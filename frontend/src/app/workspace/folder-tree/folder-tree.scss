@@ -1,0 +1,26 @@
+.tree {
+  margin-bottom: 0.5rem;
+}
+
+.loading,
+.error {
+  margin: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.error {
+  color: var(--error-color, #c00);
+}
+
+.btn-add {
+  font-size: 0.875rem;
+  padding: 0.25rem 0;
+  color: var(--text-muted, #666);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-add:hover {
+  color: var(--text-color, #333);
+}

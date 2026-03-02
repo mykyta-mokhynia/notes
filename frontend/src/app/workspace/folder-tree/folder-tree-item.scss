@@ -1,0 +1,55 @@
+.folder-item {
+  margin-left: 0;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.folder-row:hover {
+  background: var(--hover-bg, #f5f5f5);
+}
+
+.btn-fav {
+  padding: 0 0.2rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--text-muted, #999);
+  flex-shrink: 0;
+}
+.btn-fav:hover {
+  color: var(--focus-color, #1976d2);
+}
+
+.folder-title {
+  flex: 1;
+  font-size: 0.875rem;
+  min-width: 0;
+}
+
+.btn-add-child {
+  opacity: 0.5;
+  font-size: 0.75rem;
+  padding: 0 0.25rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.btn-add-child:hover {
+  opacity: 1;
+}
+
+.children {
+  margin-left: 1rem;
+  border-left: 1px solid var(--border-color, #eee);
+  padding-left: 0.5rem;
+}

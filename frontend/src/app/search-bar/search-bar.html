@@ -1,0 +1,38 @@
+<div class="search-bar">
+  <input
+    type="search"
+    class="search-input"
+    placeholder="Search folders & pages…"
+    [value]="searchQuery()"
+    (input)="onInput($event)"
+    (focus)="open.set(true)"
+  />
+  @if (open()) {
+    <div class="search-backdrop" (click)="close()"></div>
+    <div class="search-dropdown">
+      @if (loading()) {
+        <div class="search-loading">Searching…</div>
+      } @else if (results().length === 0) {
+        <div class="search-empty">No results</div>
+      } @else {
+        <ul class="search-list">
+          @for (hit of results(); track trackById($index, hit)) {
+            <li>
+              @if (hit.type === 'folder') {
+                <a routerLink="/home" [queryParams]="{ folder: hit.id }" (click)="close()" class="search-item folder">
+                  <span class="search-icon">📁</span>
+                  {{ hit.title }}
+                </a>
+              } @else {
+                <a [routerLink]="noteUrl(hit.id)" [queryParams]="noteQueryParams(hit.id)" (click)="close()" class="search-item note">
+                  <span class="search-icon">📄</span>
+                  {{ hit.title }}
+                </a>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </div>
+  }
+</div>

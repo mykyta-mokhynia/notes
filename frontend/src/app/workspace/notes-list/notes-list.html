@@ -1,0 +1,27 @@
+@if (loading && showLoadingMessage) {
+  <p class="loading">Loading…</p>
+} @else if (error) {
+  <p class="error">{{ error }}</p>
+} @else {
+  <ul class="notes-list" cdkDropList [cdkDropListData]="notes" (cdkDropListDropped)="onNoteDrop($event)">
+    @for (note of notes; track note.id) {
+      <li cdkDrag [cdkDragData]="note" data-drag-type="note">
+        <button type="button" class="note-row" (click)="onNoteClick(note)">
+          <button type="button" class="btn-fav" (click)="onToggleFavourite($event, note)" [title]="favouriteService.isNoteFavourite(note.id) ? 'Remove from favourites' : 'Add to favourites'">
+            {{ favouriteService.isNoteFavourite(note.id) ? '★' : '☆' }}
+          </button>
+          <span class="note-title">{{ note.title }}</span>
+          <span class="note-visibility-badge" [class.note-visibility-badge--public]="note.visibility === 'PUBLIC'" [class.note-visibility-badge--private]="note.visibility === 'PRIVATE'">
+            {{ note.visibility === 'PUBLIC' ? 'Public' : 'Private' }}
+          </span>
+        </button>
+      </li>
+    }
+  </ul>
+  @if (showCreateButton()) {
+    <button type="button" class="btn-add" (click)="onCreateNote()">
+      <span class="btn-add-icon"><app-icon-page></app-icon-page></span>
+      <span>New page</span>
+    </button>
+  }
+}

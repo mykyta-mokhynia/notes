@@ -1,0 +1,63 @@
+@if (loading()) {
+  <div class="loading">Loading page…</div>
+} @else if (error()) {
+  <div class="error">{{ error() }}</div>
+} @else if (note()) {
+  <div class="note-editor">
+    <header class="note-header">
+      <h1 class="note-title">{{ note()!.title }}</h1>
+      <div class="note-meta">
+        <span class="note-visibility-badge" [class.note-visibility-badge--public]="note()!.visibility === 'PUBLIC'" [class.note-visibility-badge--private]="note()!.visibility === 'PRIVATE'">
+          {{ note()!.visibility === 'PUBLIC' ? 'Public' : 'Private' }}
+        </span>
+        <span class="note-meta-date">{{ note()!.updated_at | date:'short' }}</span>
+      </div>
+    </header>
+    <div class="blocks">
+      @for (block of sortedBlocks(); track block.id) {
+        <div class="block-wrapper" [attr.data-block-id]="block.id">
+          <div class="block-handle">
+            <button type="button" class="btn-move" (click)="moveBlockUp(block)" title="Move up">↑</button>
+            <button type="button" class="btn-move" (click)="moveBlockDown(block)" title="Move down">↓</button>
+          </div>
+          <div class="block-content">
+        @switch (block.type) {
+          @case ('text') {
+            <app-block-text
+              [block]="block"
+              (contentChange)="onBlockContentChange(block, $event)"
+            ></app-block-text>
+          }
+          @case ('code') {
+            <app-block-code
+              [block]="block"
+              (contentChange)="onBlockContentChange(block, $event)"
+            ></app-block-code>
+          }
+          @case ('note_link') {
+            <app-note-reference-card
+              [targetNoteId]="getNoteLinkTarget(block)"
+              [display]="getNoteLinkDisplay(block)"
+              [blockData]="block.data"
+              (contentChange)="onBlockContentChange(block, $event)"
+            ></app-note-reference-card>
+          }
+          @default {
+            <div class="block-unknown">Block type: {{ block.type }}</div>
+          }
+        }
+          </div>
+        </div>
+      }
+    </div>
+    <div class="toolbar">
+      <button type="button" (click)="addBlock('text')">+ Text</button>
+      <button type="button" (click)="addBlock('code', { raw_code: '' })">+ Code</button>
+      <button type="button" (click)="addBlock('note_link', { target_note_id: '', display: 'card' })">+ Page link</button>
+      <button type="button" (click)="rebalanceBlocks()" title="Rebalance positions">Rebalance</button>
+      @if (!note()!.is_about_note) {
+        <button type="button" class="btn-delete" (click)="deleteNote()" title="Delete page">Delete</button>
+      }
+    </div>
+  </div>
+}

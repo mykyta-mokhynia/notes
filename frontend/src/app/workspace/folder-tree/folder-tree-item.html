@@ -1,0 +1,35 @@
+<div
+  class="folder-item"
+  cdkDropList
+  [id]="'folder-' + folder().id"
+  [cdkDropListData]="{ parentId: folder().id }"
+  (cdkDropListDropped)="onDrop($event)"
+>
+  <div class="folder-row" cdkDrag [cdkDragData]="folder()" (click)="onClick()" data-drag-type="folder">
+    <button type="button" class="btn-fav" (click)="onToggleFavourite($event)" [title]="favouriteService.isFolderFavourite(folder().id) ? 'Remove from favourites' : 'Add to favourites'">
+      {{ favouriteService.isFolderFavourite(folder().id) ? '★' : '☆' }}
+    </button>
+    <span class="folder-title">{{ folder().title }}</span>
+    <button
+      type="button"
+      class="btn-add-child"
+      (click)="onAddChild($event)"
+      title="New subfolder"
+    >
+      +
+    </button>
+  </div>
+  @if (getChildren(folder().id).length > 0) {
+    <div class="children">
+      @for (child of getChildren(folder().id); track child.id) {
+        <app-folder-tree-item
+          [folder]="child"
+          [allFolders]="allFolders()"
+          (folderClick)="folderClick.emit($event)"
+          (createSubfolder)="createSubfolder.emit($event)"
+          (folderDrop)="folderDrop.emit($event)"
+        ></app-folder-tree-item>
+      }
+    </div>
+  }
+</div>

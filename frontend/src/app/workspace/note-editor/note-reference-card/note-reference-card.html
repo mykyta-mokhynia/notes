@@ -1,0 +1,18 @@
+@if (!targetNoteId) {
+  <div class="ref-set">
+    <input type="text" [(ngModel)]="editId" placeholder="Note ID" class="ref-input" />
+    <button type="button" (click)="setTarget()">Set</button>
+  </div>
+} @else if (loading) {
+  <span class="ref-loading">…</span>
+} @else if (targetNote) {
+  <a [routerLink]="['/home', 'notes', targetNote.id]" class="note-ref" [class.inline]="display === 'inline'">
+    <span class="note-ref-icon">📄</span>
+    <span class="note-ref-title">{{ targetNote.title }}</span>
+    @if (display === 'card') {
+      <span class="note-ref-meta">folder {{ targetNote.folder_id }}</span>
+    }
+  </a>
+} @else {
+  <span class="ref-missing">Note not found</span>
+}

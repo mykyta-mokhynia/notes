@@ -1,0 +1,171 @@
+<div class="sidebar-spaces">
+  <div class="spaces-header">
+    <button type="button" class="spaces-header-btn" (click)="toggleSection()">
+      <span class="spaces-title-icon"><app-icon-planet-ring></app-icon-planet-ring></span>
+      <span class="spaces-title">Spaces</span>
+    </button>
+    <button type="button" class="spaces-add-btn" (click)="openCreateSpaceModal(); $event.stopPropagation()" title="New space">
+      <app-icon-plus></app-icon-plus>
+    </button>
+    <button type="button" class="spaces-chevron-btn" (click)="toggleSection()" [attr.aria-expanded]="sectionExpanded()">
+      @if (sectionExpanded()) {
+        <app-icon-chevron-down></app-icon-chevron-down>
+      } @else {
+        <app-icon-chevron-right></app-icon-chevron-right>
+      }
+    </button>
+  </div>
+
+  @if (sectionExpanded()) {
+    <div class="spaces-list">
+      @for (space of spaces(); track space.id) {
+        <div class="space-row-wrap">
+          <div class="space-row-line" [class.expanded]="expandedSpaceId() === space.id">
+            <button
+              type="button"
+              class="space-row"
+              [class.expanded]="expandedSpaceId() === space.id"
+              (click)="toggleSpace(space)"
+            >
+              <span class="space-name">{{ space.name }}</span>
+              @if (expandedSpaceId() === space.id) {
+                <app-icon-chevron-down></app-icon-chevron-down>
+              } @else {
+                <app-icon-chevron-right></app-icon-chevron-right>
+              }
+            </button>
+            <div class="space-menu-wrap">
+              <button
+                type="button"
+                class="space-menu-btn"
+                (click)="toggleSpaceMenu(space.id, $event)"
+                title="Space menu"
+                aria-label="Space menu"
+              >
+                <app-icon-ellipsis></app-icon-ellipsis>
+              </button>
+            </div>
+          </div>
+
+          @if (expandedSpaceId() === space.id) {
+            <div class="space-content">
+              @if (hasAboutNote(space)) {
+                <button type="button" class="section-row" (click)="openAboutNote(space.about_note_id!)">
+                  <span class="section-row-icon">
+                    <app-icon-about></app-icon-about>
+                  </span>
+                  <span class="section-row-label">About space {{ space.name }}</span>
+                </button>
+              }
+              <div class="section-row-wrap">
+                <button type="button" class="section-row" (click)="toggleContent()">
+                  <span class="section-row-icon">
+                    <span class="section-row-icon-default"><app-icon-content></app-icon-content></span>
+                    <span class="section-row-icon-expand"><app-icon-chevron-down></app-icon-chevron-down></span>
+                  </span>
+                  <span class="section-row-label">Content</span>
+                </button>
+                <div class="content-create-wrap">
+                  <button
+                    type="button"
+                    class="content-create-btn"
+                    (click)="toggleContentCreate(space.id, $event)"
+                    title="Create folder or page"
+                  >
+                    <app-icon-plus></app-icon-plus>
+                  </button>
+                </div>
+              </div>
+              @if (contentExpanded()) {
+                <div class="space-tree-notes">
+                  <app-folder-tree
+                    [rootFolderId]="space.root_folder_id"
+                    [showCreateButton]="false"
+                    (selectFolder)="onSelectFolder($event)"
+                  ></app-folder-tree>
+                  @if (selectedFolderId() !== null) {
+                    <app-notes-list
+                      [folderId]="selectedFolderId()!"
+                      [showCreateButton]="false"
+                      [excludeNoteId]="space.about_note_id ?? null"
+                      (selectNote)="onSelectNote($event)"
+                    ></app-notes-list>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  @if (contentCreateOpenSpaceId() !== null) {
+    @if (contentCreatePosition(); as pos) {
+      <div
+        class="content-create-dropdown content-create-dropdown--fixed"
+        [style.top.px]="pos.top"
+        [style.left.px]="pos.left"
+      >
+        <button type="button" class="content-create-dropdown-item" (click)="onCreateFolder()">
+          <span class="content-create-dropdown-icon"><app-icon-folder></app-icon-folder></span>
+          <span>Folder</span>
+        </button>
+        <button type="button" class="content-create-dropdown-item" (click)="onCreateNote()" [disabled]="selectedFolderId() === null">
+          <span class="content-create-dropdown-icon"><app-icon-page></app-icon-page></span>
+          <span>Page</span>
+        </button>
+      </div>
+    }
+  }
+
+  @if (spaceForMenu(); as space) {
+    @if (spaceMenuPosition(); as pos) {
+      <div
+        class="space-context-menu space-context-menu--fixed"
+        [style.top.px]="pos.top"
+        [style.left.px]="pos.left"
+      >
+        <button type="button" class="space-menu-item" (click)="onEditSpace(space)">
+          <app-icon-edit></app-icon-edit>
+          <span>Edit</span>
+        </button>
+        <button type="button" class="space-menu-item" (click)="onToggleFavourite(space.id)">
+          @if (favouriteService.isSpaceFavourite(space.id)) {
+            <app-icon-star-full></app-icon-star-full>
+          } @else {
+            <app-icon-star-empty></app-icon-star-empty>
+          }
+          <span>Favourites</span>
+        </button>
+        <div class="space-menu-divider"></div>
+        <button type="button" class="space-menu-item space-menu-item--danger" (click)="onDeleteSpace(space)">
+          <app-icon-trash></app-icon-trash>
+          <span>Delete</span>
+        </button>
+      </div>
+    }
+  }
+
+  @if (showCreateSpaceModal()) {
+    <app-create-space-modal
+      [error]="createSpaceError()"
+      (create)="onCreateSpaceName($event)"
+      (closed)="closeCreateSpaceModal()"
+    ></app-create-space-modal>
+  }
+  @if (showEditSpaceModal(); as space) {
+    <app-edit-space-modal
+      [initialName]="space.name"
+      [error]="editSpaceError()"
+      (update)="onUpdateSpaceName($event)"
+      (closed)="closeEditSpaceModal()"
+    ></app-edit-space-modal>
+  }
+  @if (showDeleteSpaceModal(); as space) {
+    <app-delete-space-modal
+      (confirm)="onConfirmDeleteSpace()"
+      (closed)="closeDeleteSpaceModal()"
+    ></app-delete-space-modal>
+  }
+</div>

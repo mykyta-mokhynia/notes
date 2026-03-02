@@ -1,0 +1,11 @@
+<div class="workspace">
+  <aside class="sidebar">
+    <app-sidebar-about></app-sidebar-about>
+    <app-sidebar-recent></app-sidebar-recent>
+    <app-sidebar-favourite></app-sidebar-favourite>
+    <app-sidebar-spaces (selectNote)="onSelectNote($event)"></app-sidebar-spaces>
+  </aside>
+  <main class="main">
+    <router-outlet></router-outlet>
+  </main>
+</div>

@@ -1,0 +1,29 @@
+@if (loading && showLoadingMessage) {
+  <p class="loading">Loading…</p>
+} @else if (error) {
+  <p class="error">{{ error }}</p>
+} @else {
+  <div class="tree" cdkDropListGroup>
+    <div
+      cdkDropList
+      id="folder-root"
+      [cdkDropListData]="{ parentId: null }"
+      (cdkDropListDropped)="onRootDrop($event)"
+    >
+      @for (f of getTopLevelFolders(); track f.id) {
+        <app-folder-tree-item
+          [folder]="f"
+          [allFolders]="getVisibleFolders()"
+          (folderClick)="onFolderClick($event)"
+          (createSubfolder)="createFolder($event)"
+          (folderDrop)="onFolderDrop($event)"
+        ></app-folder-tree-item>
+      }
+    </div>
+  </div>
+  @if (showCreateButton()) {
+    <button type="button" class="btn-add" (click)="createFolder(null)">
+      + New folder
+    </button>
+  }
+}
