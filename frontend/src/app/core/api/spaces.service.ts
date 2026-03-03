@@ -8,6 +8,8 @@ export interface Space {
   name: string;
   root_folder_id: number;
   about_note_id: string | null;
+  /** Present when listed from API (note count in this space). */
+  note_count?: number;
 }
 
 const BASE = `${environment.apiUrl}/api/spaces`;

@@ -21,6 +21,25 @@ export async function listSpaces(): Promise<Space[]> {
   return rows.map(rowToSpace);
 }
 
+export interface SpaceWithNoteCount extends Space {
+  note_count: number;
+}
+
+/** List spaces with note count per space (notes in root folder and all descendants). */
+export async function listSpacesWithNoteCount(): Promise<SpaceWithNoteCount[]> {
+  const { rows } = await query<SpaceRow & { note_count: number }>(
+    `SELECT s.id, s.name, s.root_folder_id, s.about_note_id,
+            (SELECT count(*)::int FROM notes n
+             INNER JOIN folders f ON n.folder_id = f.id
+             WHERE f.path IS NOT NULL AND f.path <@ (SELECT path FROM folders WHERE id = s.root_folder_id)::ltree) AS note_count
+     FROM spaces s ORDER BY s.id`
+  );
+  return rows.map((r) => ({
+    ...rowToSpace(r),
+    note_count: Number(r.note_count) || 0,
+  }));
+}
+
 export async function getSpaceById(id: number): Promise<Space | null> {
   const { rows } = await query<SpaceRow>(
     `SELECT ${COLS} FROM spaces WHERE id = $1`,

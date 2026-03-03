@@ -7,6 +7,8 @@ export interface Favourites {
   folderIds: number[];
   noteIds: string[];
   spaceIds: number[];
+  /** noteId -> last opened timestamp (ms) for favourite notes */
+  noteLastVisited?: Record<string, number>;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -24,6 +26,10 @@ export class FavouriteService {
         folderIds: Array.isArray(parsed.folderIds) ? parsed.folderIds : [],
         noteIds: Array.isArray(parsed.noteIds) ? parsed.noteIds : [],
         spaceIds: Array.isArray(parsed.spaceIds) ? parsed.spaceIds : [],
+        noteLastVisited:
+          parsed.noteLastVisited && typeof parsed.noteLastVisited === 'object'
+            ? parsed.noteLastVisited
+            : {},
       };
     } catch {
       return { folderIds: [], noteIds: [], spaceIds: [] };
@@ -42,7 +48,19 @@ export class FavouriteService {
       folderIds: [...this.data.folderIds],
       noteIds: [...this.data.noteIds],
       spaceIds: [...this.data.spaceIds],
+      noteLastVisited: this.data.noteLastVisited ? { ...this.data.noteLastVisited } : {},
     };
+  }
+
+  getNoteLastVisited(noteId: string): number | null {
+    const ts = this.data.noteLastVisited?.[noteId];
+    return typeof ts === 'number' ? ts : null;
+  }
+
+  setNoteLastVisited(noteId: string, timestamp: number): void {
+    if (!this.data.noteLastVisited) this.data.noteLastVisited = {};
+    this.data.noteLastVisited[noteId] = timestamp;
+    this.save();
   }
 
   isFolderFavourite(folderId: number): boolean {

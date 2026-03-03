@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NotesService, Note, NoteBlock } from '../../core/api/notes.service';
 import { RecentService } from '../../core/sidebar/recent.service';
+import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { CommonModule } from '@angular/common';
 import { BlockTextComponent } from './block-text/block-text';
 import { BlockCodeComponent } from './block-code/block-code';
@@ -33,7 +34,8 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
     private route: ActivatedRoute,
     private router: Router,
     private notesService: NotesService,
-    private recentService: RecentService
+    private recentService: RecentService,
+    private favouriteService: FavouriteService
   ) {}
 
   ngOnInit(): void {
@@ -54,6 +56,9 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
       next: (n: Note) => {
         this.note.set(n);
         this.recentService.add(n.id, n.title);
+        if (this.favouriteService.isNoteFavourite(n.id)) {
+          this.favouriteService.setNoteLastVisited(n.id, Date.now());
+        }
         this.loadBlocks(id);
       },
       error: (err: { message?: string }) => {

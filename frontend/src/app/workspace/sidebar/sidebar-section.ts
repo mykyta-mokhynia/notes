@@ -26,21 +26,20 @@ import { IconChevronRightComponent } from '../icons/icon-chevron-right';
       }
     </button>
     @if (panelMode()) {
-      @if (expanded()) {
-        <div
-          class="sidebar-section-panel sidebar-section-panel--popover"
-          [style.top.px]="panelTop()"
-          [style.left.px]="panelLeft()"
-        >
-          <div class="sidebar-section-panel-inner">
-            <ng-content></ng-content>
-          </div>
+      <div
+        class="sidebar-section-panel sidebar-section-panel--popover"
+        [class.sidebar-section-panel--hidden]="!expanded()"
+        [style.top.px]="panelTop()"
+        [style.left.px]="panelLeft()"
+      >
+        <div class="sidebar-section-panel-inner">
+          <ng-content select="[sidebarSectionContent]"><p class="sidebar-section-panel-fallback">Loading…</p></ng-content>
         </div>
-      }
+      </div>
     } @else {
       @if (expanded()) {
         <div class="sidebar-section-content">
-          <ng-content></ng-content>
+          <ng-content select="[sidebarSectionContent]"></ng-content>
         </div>
       }
     }
@@ -130,7 +129,7 @@ import { IconChevronRightComponent } from '../icons/icon-chevron-right';
         transform: rotate(0deg);
       }
       .sidebar-section-content {
-        margin-bottom: 0.5rem;
+        padding-bottom: 0.5rem;
       }
       .sidebar-section-panel {
         position: fixed;
@@ -146,10 +145,18 @@ import { IconChevronRightComponent } from '../icons/icon-chevron-right';
         max-height: min(70vh, 400px);
         min-height: 80px;
       }
+      .sidebar-section-panel--hidden {
+        display: none;
+      }
       .sidebar-section-panel-inner {
         height: 100%;
         overflow-y: auto;
         padding: 1rem;
+      }
+      .sidebar-section-panel-fallback {
+        margin: 0;
+        font-size: 0.9375rem;
+        color: var(--text-color, #111);
       }
       @keyframes sidebar-section-panel-in {
         from {

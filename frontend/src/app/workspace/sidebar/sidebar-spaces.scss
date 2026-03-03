@@ -4,7 +4,7 @@
 }
 
 .sidebar-spaces {
-  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
   width: 100%;
   min-width: 0;
 }
@@ -105,13 +105,15 @@
 }
 
 .spaces-list {
-  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
 }
 
 .space-row-wrap {
   display: flex;
   flex-direction: column;
-  margin-bottom: 0.125rem;
 }
 
 .space-row-line {
@@ -255,14 +257,15 @@
 }
 
 .space-menu-divider {
-  height: 1px;
-  margin: 0.25rem 0;
-  background: var(--border-color, #e0e0e0);
+  height: 0;
+  padding: 0.25rem 0;
+  border: none;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  background: none;
 }
 
 .space-content {
-  margin-left: 0.5rem;
-  padding-left: 0.75rem;
+  padding-left: calc(0.5rem + 0.75rem);
   border-left: 1px solid var(--border-color, #e8e8e8);
 }
 
@@ -412,6 +415,6 @@
 }
 
 .space-tree-notes {
-  margin-top: 0.25rem;
-  margin-bottom: 0.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.5rem;
 }

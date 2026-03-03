@@ -4,7 +4,7 @@ import * as spacesDb from '../db/spaces';
 const router = Router();
 
 router.get('/', async (_req: Request, res: Response) => {
-  const list = await spacesDb.listSpaces();
+  const list = await spacesDb.listSpacesWithNoteCount();
   res.json(list);
 });
 
