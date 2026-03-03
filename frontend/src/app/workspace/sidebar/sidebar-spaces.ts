@@ -2,7 +2,6 @@ import {
   Component,
   OnInit,
   output,
-  viewChild,
   viewChildren,
   signal,
   HostListener,
@@ -26,11 +25,10 @@ import { IconEditComponent } from '../icons/icon-edit';
 import { IconTrashComponent } from '../icons/icon-trash';
 import { IconStarEmptyComponent } from '../icons/icon-star-empty';
 import { IconStarFullComponent } from '../icons/icon-star-full';
-import { IconPageComponent } from '../icons/icon-page';
-import { IconFolderComponent } from '../icons/icon-folder';
 import { IconPlanetRingComponent } from '../icons/icon-planet-ring';
 import { IconEyeSlashComponent } from '../icons/icon-eye-slash';
 import { IconEyeComponent } from '../icons/icon-eye';
+import { IconFolderComponent } from '../icons/icon-folder';
 import { CreateSpaceModalComponent } from './create-space-modal/create-space-modal';
 import { EditSpaceModalComponent } from './edit-space-modal/edit-space-modal';
 import { DeleteSpaceModalComponent } from './delete-space-modal/delete-space-modal';
@@ -53,11 +51,10 @@ import { FavouriteService } from '../../core/sidebar/favourite.service';
     IconTrashComponent,
     IconStarEmptyComponent,
     IconStarFullComponent,
-    IconPageComponent,
-    IconFolderComponent,
     IconPlanetRingComponent,
     IconEyeSlashComponent,
     IconEyeComponent,
+    IconFolderComponent,
     CreateSpaceModalComponent,
     EditSpaceModalComponent,
     DeleteSpaceModalComponent,
@@ -69,21 +66,22 @@ export class SidebarSpacesComponent implements OnInit {
   selectNote = output<string>();
 
   spaces = signal<Space[]>([]);
+  folders = signal<Folder[]>([]);
   sectionExpanded = signal(true);
   expandedSpaceId = signal<number | null>(null);
   /** Whether the "Content" block is expanded (when a space is expanded). */
   contentExpanded = signal(true);
   selectedFolderId = signal<number | null>(null);
-  /** When set, inline create row is shown in tree under this parent folder id. */
-  creatingUnderParentId = signal<number | null>(null);
   /** When set, this folder's title is in rename mode (input focused, selected). */
   folderIdBeingRenamed = signal<number | null>(null);
+  /** When set, this note is shown in rename mode in the notes list. */
+  noteIdBeingRenamed = signal<string | null>(null);
   /** Which space has the content create dropdown open. */
   contentCreateOpenSpaceId = signal<number | null>(null);
   /** Position for the content create dropdown (fixed overlay). */
   contentCreatePosition = signal<{ top: number; left: number } | null>(null);
-  /** When set, this note is shown in rename mode in the notes list. */
-  noteIdBeingRenamed = signal<string | null>(null);
+  /** Parent folder for current Content create dropdown action (space root). */
+  contentCreateParentFolderId = signal<number | null>(null);
   showCreateSpaceModal = signal(false);
   createSpaceError = signal<string | null>(null);
   /** Which space has the context menu open. */
@@ -98,7 +96,9 @@ export class SidebarSpacesComponent implements OnInit {
 
   /** All folder trees (one per expanded space); use the one matching current space for create. */
   folderTreeRefs = viewChildren(FolderTreeComponent);
-  notesListRef = viewChild(NotesListComponent);
+  notesListRefs = viewChildren(NotesListComponent);
+  private queryFolderId: number | null = null;
+  private querySpaceId: number | null = null;
 
   expandedSpace = computed(() => {
     const id = this.expandedSpaceId();
@@ -150,48 +150,27 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.loadSpaces();
+    this.loadSidebarData();
     this.route.queryParamMap.subscribe((params) => {
       const folderParam = params.get('folder');
       const spaceParam = params.get('space');
-      const folderId = folderParam ? parseInt(folderParam, 10) : null;
-      const spaceId = spaceParam ? parseInt(spaceParam, 10) : null;
-
-      if (folderId != null && !Number.isNaN(folderId)) {
-        // Need to find which space contains this folder so we expand the right space
-        forkJoin({
-          spaces: this.spacesService.list(),
-          folders: this.foldersService.getTree(),
-        }).subscribe(({ spaces, folders }) => {
-          this.spaces.set(spaces);
-          const spaceIdForFolder = this.findSpaceIdForFolderId(folderId, folders, spaces);
-          if (spaceIdForFolder != null) {
-            this.expandedSpaceId.set(spaceIdForFolder);
-            this.selectedFolderId.set(folderId);
-          } else {
-            this.selectedFolderId.set(folderId);
-          }
-        });
-        return;
+      this.queryFolderId = folderParam ? parseInt(folderParam, 10) : null;
+      if (this.queryFolderId != null && Number.isNaN(this.queryFolderId)) {
+        this.queryFolderId = null;
       }
-
-      if (spaceId != null && !Number.isNaN(spaceId)) {
-        this.spacesService.list().subscribe((spaces) => {
-          this.spaces.set(spaces);
-          const space = spaces.find((s) => s.id === spaceId);
-          if (space) {
-            this.expandedSpaceId.set(spaceId);
-            this.selectedFolderId.set(space.root_folder_id);
-          }
-        });
+      this.querySpaceId = spaceParam ? parseInt(spaceParam, 10) : null;
+      if (this.querySpaceId != null && Number.isNaN(this.querySpaceId)) {
+        this.querySpaceId = null;
       }
+      this.applySelectionFromQuery();
     });
   }
 
   /** Update URL query params to match current selection so refresh/share link works. */
   private updateUrlFromSelection(): void {
     const spaceId = this.expandedSpaceId();
-    const folderId = this.selectedFolderId();
+    const space = spaceId != null ? this.spaces().find((s) => s.id === spaceId) ?? null : null;
+    const folderId = space ? this.getActiveFolderId(space) : null;
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { space: spaceId ?? null, folder: folderId ?? null },
@@ -217,11 +196,58 @@ export class SidebarSpacesComponent implements OnInit {
     return null;
   }
 
-  loadSpaces(): void {
-    this.spacesService.list().subscribe({
-      next: (list) => this.spaces.set(list),
+  private loadSidebarData(): void {
+    forkJoin({
+      spaces: this.spacesService.list(),
+      folders: this.foldersService.getTree(),
+    }).subscribe({
+      next: ({ spaces, folders }) => {
+        this.spaces.set(spaces);
+        this.folders.set(folders);
+        this.applySelectionFromQuery();
+      },
       error: () => {},
     });
+  }
+
+  private refreshFolders(): void {
+    this.foldersService.getTree().subscribe({
+      next: (list) => this.folders.set(list),
+      error: () => {},
+    });
+  }
+
+  private applySelectionFromQuery(): void {
+    const spaces = this.spaces();
+    const folders = this.folders();
+    if (spaces.length === 0 || folders.length === 0) return;
+
+    if (this.queryFolderId != null) {
+      const spaceIdForFolder = this.findSpaceIdForFolderId(
+        this.queryFolderId,
+        folders,
+        spaces
+      );
+      if (spaceIdForFolder != null) {
+        this.expandedSpaceId.set(spaceIdForFolder);
+        this.selectedFolderId.set(this.queryFolderId);
+        return;
+      }
+    }
+
+    if (this.querySpaceId != null) {
+      const space = spaces.find((s) => s.id === this.querySpaceId);
+      if (space) {
+        this.expandedSpaceId.set(space.id);
+        this.selectedFolderId.set(space.root_folder_id);
+        return;
+      }
+    }
+
+    const currentSpace = this.expandedSpace();
+    if (currentSpace && !this.isFolderInSpace(this.selectedFolderId(), currentSpace.id)) {
+      this.selectedFolderId.set(currentSpace.root_folder_id);
+    }
   }
 
   toggleSection(): void {
@@ -229,8 +255,9 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   toggleSpace(space: Space): void {
-    this.expandedSpaceId.update((id) => (id === space.id ? null : space.id));
-    if (this.expandedSpaceId() === space.id) {
+    const nextId = this.expandedSpaceId() === space.id ? null : space.id;
+    this.expandedSpaceId.set(nextId);
+    if (nextId === space.id) {
       this.selectedFolderId.set(space.root_folder_id);
       this.contentExpanded.set(true);
       this.updateUrlFromSelection();
@@ -240,8 +267,33 @@ export class SidebarSpacesComponent implements OnInit {
     }
   }
 
-  toggleContent(): void {
+  toggleContent(space: Space): void {
+    this.selectedFolderId.set(space.root_folder_id);
     this.contentExpanded.update((v) => !v);
+    this.updateUrlFromSelection();
+  }
+
+  getActiveFolderId(space: Space): number {
+    const selected = this.selectedFolderId();
+    if (this.isFolderInSpace(selected, space.id)) {
+      return selected!;
+    }
+    return space.root_folder_id;
+  }
+
+  private isFolderInSpace(folderId: number | null, spaceId: number): boolean {
+    if (folderId == null) return false;
+    const folderMap = new Map(this.folders().map((f) => [f.id, f]));
+    const space = this.spaces().find((s) => s.id === spaceId);
+    if (!space) return false;
+
+    let current = folderMap.get(folderId) ?? null;
+    while (current) {
+      if (current.id === space.root_folder_id) return true;
+      if (current.parent_id == null) return false;
+      current = folderMap.get(current.parent_id) ?? null;
+    }
+    return false;
   }
 
   openCreateSpaceModal(): void {
@@ -258,6 +310,7 @@ export class SidebarSpacesComponent implements OnInit {
         this.expandedSpaceId.set(space.id);
         this.selectedFolderId.set(space.root_folder_id);
         this.contentExpanded.set(true);
+        this.refreshFolders();
         if (this.hasAboutNote(space)) this.selectNote.emit(space.about_note_id!);
       },
       error: (err) => {
@@ -281,6 +334,10 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onSelectFolder(folderId: number | null): void {
+    const expanded = this.expandedSpaceId();
+    if (expanded != null && !this.isFolderInSpace(folderId, expanded)) {
+      return;
+    }
     this.selectedFolderId.set(folderId);
     this.updateUrlFromSelection();
   }
@@ -293,14 +350,14 @@ export class SidebarSpacesComponent implements OnInit {
     this.selectNote.emit(noteId);
   }
 
-  toggleContentCreate(spaceId: number, event: Event): void {
+  toggleContentCreate(space: Space, event: Event): void {
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
     const rect = btn?.getBoundingClientRect();
-    if (this.contentCreateOpenSpaceId() === spaceId) {
-      this.contentCreateOpenSpaceId.set(null);
-      this.contentCreatePosition.set(null);
+    if (this.contentCreateOpenSpaceId() === space.id) {
+      this.closeContentCreate();
     } else {
-      this.contentCreateOpenSpaceId.set(spaceId);
+      this.contentCreateOpenSpaceId.set(space.id);
+      this.contentCreateParentFolderId.set(space.root_folder_id);
       this.contentCreatePosition.set(
         rect ? { top: rect.bottom + 4, left: rect.left } : null
       );
@@ -310,23 +367,24 @@ export class SidebarSpacesComponent implements OnInit {
   closeContentCreate(): void {
     this.contentCreateOpenSpaceId.set(null);
     this.contentCreatePosition.set(null);
+    this.contentCreateParentFolderId.set(null);
   }
 
   private readonly defaultFolderName = 'folder';
 
   onCreateFolder(): void {
-    const spaceId = this.contentCreateOpenSpaceId();
-    const space = spaceId != null ? this.spaces().find((s) => s.id === spaceId) : null;
-    const parentId = this.selectedFolderId() ?? space?.root_folder_id ?? null;
-    this.closeContentCreate();
+    const parentId = this.contentCreateParentFolderId();
     if (parentId == null) return;
     this.foldersService.create(parentId, this.defaultFolderName).subscribe({
       next: (created) => {
+        this.closeContentCreate();
         const trees = this.folderTreeRefs();
-        const tree = space
-          ? trees.find((t) => Number(t.getRootFolderId()) === Number(space.root_folder_id))
+        const expanded = this.expandedSpace();
+        const tree = expanded
+          ? trees.find((t) => Number(t.getRootFolderId()) === Number(expanded.root_folder_id))
           : trees[0];
         tree?.refresh();
+        this.refreshFolders();
         this.onFolderCreated(created);
       },
       error: () => alert('Failed to create folder'),
@@ -336,26 +394,23 @@ export class SidebarSpacesComponent implements OnInit {
   private readonly defaultNoteTitle = 'note';
 
   onCreateNote(): void {
-    const folderId =
-      this.selectedFolderId() ??
-      this.spaces().find((s) => s.id === this.expandedSpaceId())?.root_folder_id ??
-      null;
-    this.closeContentCreate();
+    const folderId = this.contentCreateParentFolderId();
     if (folderId == null) return;
     this.notesService.create(folderId, this.defaultNoteTitle).subscribe({
       next: (created) => {
+        this.closeContentCreate();
         this.selectedFolderId.set(folderId);
-        this.notesListRef()?.refresh(folderId);
+        this.refreshNotesListForFolder(folderId);
         this.noteIdBeingRenamed.set(created.id);
         this.selectNote.emit(created.id);
       },
-      error: () => alert('Failed to create note'),
+      error: () => alert('Failed to create page'),
     });
   }
 
   onFolderCreated(created: Folder): void {
-    this.creatingUnderParentId.set(null);
-    this.selectedFolderId.set(created.id);
+    // Keep parent folder selected so its existing content stays visible.
+    this.selectedFolderId.set(created.parent_id ?? created.id);
     this.folderIdBeingRenamed.set(created.id);
     this.updateUrlFromSelection();
   }
@@ -369,16 +424,24 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onCreateNoteInFolder(folderId: number): void {
-    this.creatingUnderParentId.set(null);
     this.notesService.create(folderId, this.defaultNoteTitle).subscribe({
       next: (created) => {
         this.selectedFolderId.set(folderId);
-        this.notesListRef()?.refresh(folderId);
+        this.refreshNotesListForFolder(folderId);
         this.noteIdBeingRenamed.set(created.id);
         this.selectNote.emit(created.id);
       },
       error: () => alert('Failed to create note'),
     });
+  }
+
+  private refreshNotesListForFolder(folderId: number): void {
+    const refs = this.notesListRefs();
+    for (const ref of refs) {
+      if (Number(ref.folderId()) === Number(folderId)) {
+        ref.refresh(folderId);
+      }
+    }
   }
 
   toggleSpaceMenu(spaceId: number, event: Event): void {
@@ -456,6 +519,7 @@ export class SidebarSpacesComponent implements OnInit {
     this.spacesService.delete(id).subscribe({
       next: () => {
         this.spaces.update((list) => list.filter((s) => s.id !== id));
+        this.refreshFolders();
         if (this.expandedSpaceId() === id) this.expandedSpaceId.set(null);
         this.deleteSpaceId.set(null);
       },

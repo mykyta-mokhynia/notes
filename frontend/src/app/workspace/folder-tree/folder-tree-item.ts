@@ -7,6 +7,8 @@ import { IconFolderComponent } from '../icons/icon-folder';
 import { IconChevronRightComponent } from '../icons/icon-chevron-right';
 import { IconChevronDownComponent } from '../icons/icon-chevron-down';
 import { IconPlusComponent } from '../icons/icon-plus';
+import { IconContentComponent } from '../icons/icon-content';
+import { NotesListComponent } from '../notes-list/notes-list';
 
 const DEFAULT_FOLDER_NAME = 'New folder';
 
@@ -22,6 +24,8 @@ const DEFAULT_FOLDER_NAME = 'New folder';
     IconChevronRightComponent,
     IconChevronDownComponent,
     IconPlusComponent,
+    IconContentComponent,
+    NotesListComponent,
   ],
   templateUrl: './folder-tree-item.html',
   styleUrl: './folder-tree-item.scss',
@@ -37,24 +41,31 @@ export class FolderTreeItemComponent {
   creatingUnderParentId = input<number | null>(null);
   /** When set, the folder with this id shows its title in rename mode. */
   folderIdBeingRenamed = input<number | null>(null);
+  /** Optional note id currently in rename mode (passed down from sidebar). */
+  noteIdBeingRenamed = input<string | null>(null);
 
   folderClick = output<Folder>();
+  selectNote = output<string>();
   createSubfolder = output<number>();
   createNoteInFolder = output<number>();
+  noteRenamed = output<void>();
   folderDrop = output<{ folderId: number; newParentId: number | null }>();
   /** Emitted when + is clicked so parent can set creatingUnderParentId. */
   startCreating = output<number>();
   private foldersService = inject(FoldersService);
+  private hostRef = inject(ElementRef<HTMLElement>);
   /** Emitted when a new folder is created under this folder. */
   folderCreated = output<Folder>();
   /** Emitted when this folder's title is renamed. */
   folderRenamed = output<{ folderId: number; newName: string }>();
+  /** Emitted when current folder is expanded/collapsed from its own row click. */
+  folderExpandedChange = output<{ folderId: number; expanded: boolean }>();
   /** Emitted when user cancels inline create. */
   cancelCreating = output<void>();
   /** Emitted when "Folder" is clicked in inline create: create folder with default name and show rename. */
   createFolderWithDefault = output<number>();
 
-  expanded = signal(true);
+  expanded = signal(false);
   rowHovered = signal(false);
   createDropdownOpen = signal(false);
   createDropdownPosition = signal<{ top: number; left: number } | null>(null);
@@ -80,9 +91,12 @@ export class FolderTreeItemComponent {
   }
 
   onClick(): void {
-    if (this.hasChildren()) {
-      this.expanded.update((v) => !v);
-    }
+    // Toggle on every click so collapse/expand is deterministic from first click.
+    this.expanded.update((v) => !v);
+    this.folderExpandedChange.emit({
+      folderId: this.folder().id,
+      expanded: this.expanded(),
+    });
     this.folderClick.emit(this.folder());
   }
 
@@ -101,11 +115,10 @@ export class FolderTreeItemComponent {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
-    const target = event.target as HTMLElement;
-    if (target?.closest?.('.folder-create-wrap') == null && target?.closest?.('.folder-create-dropdown') == null) {
-      this.createDropdownOpen.set(false);
-      this.createDropdownPosition.set(null);
-    }
+    const target = event.target as Node | null;
+    if (target && this.hostRef.nativeElement.contains(target)) return;
+    this.createDropdownOpen.set(false);
+    this.createDropdownPosition.set(null);
   }
 
   onCreateSubfolder(): void {
@@ -183,8 +196,9 @@ export class FolderTreeItemComponent {
 
   @ViewChild('renameInput') set renameInputRef(el: ElementRef<HTMLInputElement> | undefined) {
     if (el?.nativeElement && this.isRenaming()) {
-      this.renameTitle = this.getFolderTitle();
+      const initialTitle = this.getFolderTitle();
       setTimeout(() => {
+        this.renameTitle = initialTitle;
         el.nativeElement.focus();
         el.nativeElement.select();
       }, 0);

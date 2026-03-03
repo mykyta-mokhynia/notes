@@ -8,7 +8,7 @@
       <li cdkDrag [cdkDragData]="note" data-drag-type="note">
         <div class="note-row-wrap">
           <button type="button" class="note-row" (click)="onNoteClick(note)">
-            <span class="note-row-icon"><app-icon-page></app-icon-page></span>
+            <span class="note-row-icon"><app-icon-content></app-icon-content></span>
             @if (isNoteRenaming(note)) {
               <input
                 #noteRenameInput
@@ -42,7 +42,7 @@
   </ul>
   @if (showCreateButton()) {
     <button type="button" class="btn-add" (click)="onCreateNote()">
-      <span class="btn-add-icon"><app-icon-page></app-icon-page></span>
+      <span class="btn-add-icon"><app-icon-content></app-icon-content></span>
       <span>New page</span>
     </button>
   }

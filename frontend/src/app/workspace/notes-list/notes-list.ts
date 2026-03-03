@@ -16,7 +16,7 @@ import { FormsModule } from '@angular/forms';
 import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
 import { NoteDragService } from '../drag/note-drag.service';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
-import { IconPageComponent } from '../icons/icon-page';
+import { IconContentComponent } from '../icons/icon-content';
 import { IconEllipsisComponent } from '../icons/icon-ellipsis';
 import { IconEyeSlashComponent } from '../icons/icon-eye-slash';
 import { IconEyeComponent } from '../icons/icon-eye';
@@ -35,7 +35,7 @@ const LOADING_MESSAGE_DELAY_MS = 180;
     CommonModule,
     FormsModule,
     DragDropModule,
-    IconPageComponent,
+    IconContentComponent,
     IconEllipsisComponent,
     IconEyeSlashComponent,
     IconEyeComponent,

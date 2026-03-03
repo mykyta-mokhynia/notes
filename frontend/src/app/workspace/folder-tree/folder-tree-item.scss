@@ -21,7 +21,7 @@
   flex: 1;
   min-width: 0;
   min-height: 2rem;
-  padding: 0 0.35rem;
+  padding: 0 0.35rem 0 0;
   border: none;
   background: none;
   cursor: pointer;
@@ -35,15 +35,6 @@
 
 .folder-row-wrap:hover .folder-row {
   background: transparent;
-}
-
-.folder-row--selected,
-.folder-row-wrap:has(.folder-row--selected) {
-  background: var(--selected-bg, #e3f2fd);
-}
-
-.folder-row--selected .folder-row {
-  font-weight: 500;
 }
 
 /* Fixed-size slot: always one icon (folder or chevron), swapped in template by rowHovered() */
@@ -214,6 +205,18 @@
 }
 
 .children {
+  position: relative;
   margin-left: 0;
-  padding-left: var(--tree-indent, 10px);
+  padding-left: var(--tree-indent, 8px);
+}
+
+.children::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-color, #e0e0e0);
+  opacity: 0.9;
 }

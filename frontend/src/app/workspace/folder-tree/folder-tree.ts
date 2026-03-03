@@ -20,12 +20,17 @@ const DEFAULT_FOLDER_NAME = 'folder';
 })
 export class FolderTreeComponent implements OnInit {
   selectFolder = output<number | null>();
+  selectNote = output<string>();
   /** Emits folder id when user chooses "Page" in inline create or folder's +. */
   createNoteInFolder = output<number>();
+  /** Bubble note rename end from nested notes lists. */
+  noteRenamed = output<void>();
   /** Emitted when a new folder is created so parent can select it and start rename. */
   folderCreated = output<Folder>();
   /** Emitted when folder title is renamed. */
   folderRenamed = output<{ folderId: number; newName: string }>();
+  /** Emitted when folder row toggles expanded/collapsed. */
+  folderExpandedChange = output<{ folderId: number; expanded: boolean }>();
   /** Emitted when + is clicked on a folder row so parent can show inline create under that folder. */
   startCreating = output<number>();
   /** Emitted when user cancels inline create (Escape). */
@@ -40,6 +45,8 @@ export class FolderTreeComponent implements OnInit {
   creatingUnderParentId = input<number | null>(null);
   /** When set, the folder with this id shows its title in rename mode (input, focused, selected). */
   folderIdBeingRenamed = input<number | null>(null);
+  /** Optional note id currently in rename mode (passed down from sidebar). */
+  noteIdBeingRenamed = input<string | null>(null);
 
   /** Expose root folder id so parent can find this tree when there are multiple (e.g. sidebar spaces). */
   getRootFolderId(): number | null {
@@ -143,6 +150,14 @@ export class FolderTreeComponent implements OnInit {
     this.selectFolder.emit(folder.id);
   }
 
+  onSelectNote(noteId: string): void {
+    this.selectNote.emit(noteId);
+  }
+
+  onNoteRenamed(): void {
+    this.noteRenamed.emit();
+  }
+
   /** Public for workspace Create dropdown. */
   createFolder(parentId: number | null): void {
     const title = prompt('Folder name');
@@ -173,7 +188,6 @@ export class FolderTreeComponent implements OnInit {
       next: (created: Folder) => {
         this.foldersService.getTree().subscribe((list) => {
           this.folders = list;
-          this.selectFolder.emit(created.id);
           this.folderCreated.emit(created);
         });
       },
@@ -219,11 +233,14 @@ export class FolderTreeComponent implements OnInit {
     this.folderRenamed.emit(payload);
   }
 
+  onFolderExpandedChange(payload: { folderId: number; expanded: boolean }): void {
+    this.folderExpandedChange.emit(payload);
+  }
+
   /** When a child item creates a folder, refresh tree and re-emit to parent. */
   onFolderCreatedFromItem(created: Folder): void {
     this.foldersService.getTree().subscribe((list) => {
       this.folders = list;
-      this.selectFolder.emit(created.id);
       this.folderCreated.emit(created);
     });
   }

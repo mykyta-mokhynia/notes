@@ -58,7 +58,7 @@
                 </button>
               }
               <div class="section-row-wrap">
-                <button type="button" class="section-row" (click)="toggleContent()">
+                <button type="button" class="section-row" (click)="toggleContent(space)">
                   <span class="section-row-icon">
                     <span class="section-row-icon-default"><app-icon-content></app-icon-content></span>
                     <span class="section-row-icon-expand"><app-icon-chevron-down></app-icon-chevron-down></span>
@@ -69,7 +69,7 @@
                   <button
                     type="button"
                     class="content-create-btn"
-                    (click)="toggleContentCreate(space.id, $event); $event.stopPropagation()"
+                    (click)="toggleContentCreate(space, $event); $event.stopPropagation()"
                     title="Create folder or page"
                   >
                     <app-icon-plus></app-icon-plus>
@@ -80,27 +80,28 @@
                 <div class="space-tree-notes">
                   <app-folder-tree
                     [rootFolderId]="space.root_folder_id"
-                    [selectedFolderId]="selectedFolderId()"
-                    [creatingUnderParentId]="creatingUnderParentId()"
+                    [selectedFolderId]="getActiveFolderId(space)"
+                    [creatingUnderParentId]="null"
                     [folderIdBeingRenamed]="folderIdBeingRenamed()"
+                    [noteIdBeingRenamed]="noteIdBeingRenamed()"
                     [showCreateButton]="false"
                     (selectFolder)="onSelectFolder($event)"
+                    (selectNote)="onSelectNote($event)"
                     (createNoteInFolder)="onCreateNoteInFolder($event)"
                     (folderCreated)="onFolderCreated($event)"
                     (folderRenamed)="onFolderRenamed($event)"
-                    (startCreating)="creatingUnderParentId.set($event)"
-                    (cancelCreating)="creatingUnderParentId.set(null)"
+                    (noteRenamed)="onNoteRenamed()"
                   ></app-folder-tree>
-                  @if (selectedFolderId() !== null) {
+                  <div class="notes-group notes-group--root">
                     <app-notes-list
-                      [folderId]="selectedFolderId()!"
+                      [folderId]="space.root_folder_id"
                       [showCreateButton]="false"
                       [excludeNoteId]="space.about_note_id ?? null"
                       [noteIdBeingRenamed]="noteIdBeingRenamed()"
                       (selectNote)="onSelectNote($event)"
                       (noteRenamed)="onNoteRenamed()"
                     ></app-notes-list>
-                  }
+                  </div>
                 </div>
               }
             </div>
@@ -123,7 +124,7 @@
           <span>Folder</span>
         </button>
         <button type="button" class="content-create-dropdown-item" (click)="onCreateNote(); $event.stopPropagation()">
-          <span class="content-create-dropdown-icon"><app-icon-page></app-icon-page></span>
+          <span class="content-create-dropdown-icon"><app-icon-content></app-icon-content></span>
           <span>Page</span>
         </button>
       </div>

@@ -15,10 +15,9 @@
       (mouseleave)="rowHovered.set(false)"
       data-drag-type="folder"
       [class.folder-row--expanded]="hasChildren() && expanded()"
-      [class.folder-row--selected]="selectedFolderId() !== null && folder().id === selectedFolderId()"
     >
       <span class="folder-row-icon">
-        @if (hasChildren() && rowHovered()) {
+        @if (rowHovered()) {
           <span class="folder-row-icon-inner">
             @if (expanded()) {
               <app-icon-chevron-down></app-icon-chevron-down>
@@ -52,7 +51,7 @@
       <button
         type="button"
         class="folder-create-btn"
-        (mousedown)="onPlusClick($event)"
+        (mousedown)="toggleCreateDropdown($event)"
         (click)="$event.stopPropagation()"
         title="Create folder or page"
       >
@@ -60,6 +59,24 @@
       </button>
     </div>
   </div>
+  @if (createDropdownOpen()) {
+    @if (createDropdownPosition(); as pos) {
+      <div
+        class="folder-create-dropdown folder-create-dropdown--fixed"
+        [style.top.px]="pos.top"
+        [style.left.px]="pos.left"
+      >
+        <button type="button" class="folder-create-dropdown-item" (click)="onCreateSubfolder()">
+          <span class="folder-create-dropdown-icon"><app-icon-folder></app-icon-folder></span>
+          <span>Folder</span>
+        </button>
+        <button type="button" class="folder-create-dropdown-item" (click)="onCreateNote()">
+          <span class="folder-create-dropdown-icon"><app-icon-content></app-icon-content></span>
+          <span>Page</span>
+        </button>
+      </div>
+    }
+  }
   @if (showInlineCreateHere()) {
     <div class="inline-create-row inline-create-row--buttons">
       <button type="button" class="inline-create-btn" (click)="onInlineCreateFolder()">
@@ -70,7 +87,7 @@
       <button type="button" class="inline-create-btn inline-create-btn--cancel" (click)="cancelInlineCreate()">Cancel</button>
     </div>
   }
-  @if (hasChildren() && expanded()) {
+  @if (expanded()) {
     <div class="children">
       @for (child of getChildren(folder().id); track child.id) {
         <app-folder-tree-item
@@ -80,16 +97,27 @@
           [selectedFolderId]="selectedFolderId()"
           [creatingUnderParentId]="creatingUnderParentId()"
           [folderIdBeingRenamed]="folderIdBeingRenamed()"
+          [noteIdBeingRenamed]="noteIdBeingRenamed()"
           (folderClick)="folderClick.emit($event)"
+          (selectNote)="selectNote.emit($event)"
           (createSubfolder)="createSubfolder.emit($event)"
           (createNoteInFolder)="createNoteInFolder.emit($event)"
+          (noteRenamed)="noteRenamed.emit()"
           (folderDrop)="folderDrop.emit($event)"
           (startCreating)="startCreating.emit($event)"
           (folderCreated)="folderCreated.emit($event)"
           (folderRenamed)="folderRenamed.emit($event)"
+          (folderExpandedChange)="folderExpandedChange.emit($event)"
           (cancelCreating)="cancelCreating.emit()"
         ></app-folder-tree-item>
       }
+      <app-notes-list
+        [folderId]="folder().id"
+        [showCreateButton]="false"
+        [noteIdBeingRenamed]="noteIdBeingRenamed()"
+        (selectNote)="selectNote.emit($event)"
+        (noteRenamed)="noteRenamed.emit()"
+      ></app-notes-list>
     </div>
   }
 </div>
