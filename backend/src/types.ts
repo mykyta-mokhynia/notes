@@ -61,6 +61,7 @@ export interface Space {
   name: string;
   root_folder_id: number;
   about_note_id: string | null;
+  visibility: NoteVisibility;
 }
 
 export interface SpaceRow {
@@ -68,4 +69,5 @@ export interface SpaceRow {
   name: string;
   root_folder_id: number;
   about_note_id: string | null;
+  visibility: NoteVisibility;
 }

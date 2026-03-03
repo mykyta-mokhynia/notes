@@ -2,50 +2,64 @@
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.cdk-drag-preview .note-row {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+.notes-list li {
+  display: flex;
+  align-items: center;
+  min-height: 2rem;
 }
 
-.cdk-drag-placeholder {
-  opacity: 0.4;
+.note-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+  min-width: 0;
+  flex: 1;
+  min-height: 2rem;
+  border-radius: 4px;
 }
 
-.cdk-drag-animating {
-  transition: transform 200ms ease;
+.note-row-wrap:hover {
+  background: var(--hover-bg, #f5f5f5);
 }
 
 .note-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  width: 100%;
+  gap: 0.35rem;
+  flex: 1;
+  min-width: 0;
   min-height: 2rem;
-  padding: 0 0.5rem;
+  padding: 0 0.35rem;
   border: none;
   background: none;
   cursor: pointer;
   text-align: left;
   font-size: 0.875rem;
+  line-height: 1.25;
   border-radius: 4px;
+  box-sizing: border-box;
 }
 
-.note-row:hover {
-  background: var(--hover-bg, #f5f5f5);
+.note-row-wrap:hover .note-row {
+  background: transparent;
 }
 
-.btn-fav {
-  padding: 0 0.2rem;
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 0.7rem;
-  color: var(--text-muted, #999);
+.note-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--text-muted, #666);
 }
-.btn-fav:hover {
-  color: var(--focus-color, #1976d2);
+
+.note-row-wrap:hover .note-row-icon {
+  color: inherit;
 }
 
 .note-title {
@@ -56,24 +70,114 @@
   min-width: 0;
 }
 
-.note-visibility-badge {
-  display: inline-flex;
-  padding: 0.1rem 0.35rem;
-  font-size: 0.65rem;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.note-rename-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  padding: 0.1rem 0.25rem;
+  border: 1px solid var(--focus-color, #1976d2);
   border-radius: 3px;
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #111);
 }
 
-.note-visibility-badge--public {
-  background: var(--visibility-public-bg, #e8f5e9);
-  color: var(--visibility-public-color, #2e7d32);
+.note-rename-input:focus {
+  outline: none;
 }
 
-.note-visibility-badge--private {
-  background: var(--visibility-private-bg, #f5f5f5);
-  color: var(--visibility-private-color, #616161);
+.note-menu-wrap {
+  flex-shrink: 0;
+}
+
+.note-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-color, #111);
+  border-radius: 4px;
+}
+
+.note-row-wrap:hover .note-menu-btn {
+  color: var(--text-color, #111);
+}
+
+.note-context-menu {
+  padding: 0.35rem 0;
+  background: var(--bg-color, #fff);
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  min-width: 220px;
+}
+
+.note-context-menu--fixed {
+  position: fixed;
+  z-index: 200;
+}
+
+.note-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--text-color, #111);
+  text-align: left;
+}
+
+.note-menu-item:hover {
+  background: var(--hover-bg, #f0f0f0);
+}
+
+.note-menu-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.note-menu-item--favourite .icon-star-full--gold {
+  color: #c9a227;
+}
+
+.note-menu-item--danger {
+  color: var(--danger-color, #c00);
+}
+
+.note-menu-item--danger:hover {
+  background: var(--danger-bg-hover, rgba(204, 0, 0, 0.08));
+}
+
+.note-menu-divider {
+  height: 0;
+  padding: 0.25rem 0;
+  border: none;
+  border-top: 1px solid var(--border-color, #e0e0e0);
+  background: none;
+}
+
+.cdk-drag-preview .note-row-wrap {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.cdk-drag-placeholder {
+  opacity: 0.4;
+}
+
+.cdk-drag-animating {
+  transition: transform 200ms ease;
 }
 
 .btn-add {

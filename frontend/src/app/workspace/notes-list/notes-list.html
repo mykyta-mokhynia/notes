@@ -6,15 +6,37 @@
   <ul class="notes-list" cdkDropList [cdkDropListData]="notes" (cdkDropListDropped)="onNoteDrop($event)">
     @for (note of notes; track note.id) {
       <li cdkDrag [cdkDragData]="note" data-drag-type="note">
-        <button type="button" class="note-row" (click)="onNoteClick(note)">
-          <button type="button" class="btn-fav" (click)="onToggleFavourite($event, note)" [title]="favouriteService.isNoteFavourite(note.id) ? 'Remove from favourites' : 'Add to favourites'">
-            {{ favouriteService.isNoteFavourite(note.id) ? '★' : '☆' }}
+        <div class="note-row-wrap">
+          <button type="button" class="note-row" (click)="onNoteClick(note)">
+            <span class="note-row-icon"><app-icon-page></app-icon-page></span>
+            @if (isNoteRenaming(note)) {
+              <input
+                #noteRenameInput
+                type="text"
+                class="note-rename-input"
+                [ngModel]="renameTitle"
+                (ngModelChange)="renameTitle = $event"
+                (keydown.enter)="submitNoteRename(note)"
+                (keydown.escape)="cancelNoteRename()"
+                (blur)="submitNoteRename(note)"
+                (click)="$event.stopPropagation()"
+              />
+            } @else {
+              <span class="note-title">{{ note.title }}</span>
+            }
           </button>
-          <span class="note-title">{{ note.title }}</span>
-          <span class="note-visibility-badge" [class.note-visibility-badge--public]="note.visibility === 'PUBLIC'" [class.note-visibility-badge--private]="note.visibility === 'PRIVATE'">
-            {{ note.visibility === 'PUBLIC' ? 'Public' : 'Private' }}
-          </span>
-        </button>
+          <div class="note-menu-wrap">
+            <button
+              type="button"
+              class="note-menu-btn"
+              (click)="toggleNoteMenu(note.id, $event)"
+              title="Note menu"
+              aria-label="Note menu"
+            >
+              <app-icon-ellipsis></app-icon-ellipsis>
+            </button>
+          </div>
+        </div>
       </li>
     }
   </ul>
@@ -23,5 +45,38 @@
       <span class="btn-add-icon"><app-icon-page></app-icon-page></span>
       <span>New page</span>
     </button>
+  }
+}
+
+@if (noteMenuNote(); as note) {
+  @if (noteMenuPosition(); as pos) {
+    <div
+      class="note-context-menu note-context-menu--fixed"
+      [style.top.px]="pos.top"
+      [style.left.px]="pos.left"
+    >
+      <button type="button" class="note-menu-item" (click)="onToggleVisibility(note)">
+        @if (note.visibility === 'PUBLIC') {
+          <span class="note-menu-item-icon"><app-icon-eye-slash></app-icon-eye-slash></span>
+          <span>Make note private</span>
+        } @else {
+          <span class="note-menu-item-icon"><app-icon-eye></app-icon-eye></span>
+          <span>Make note public</span>
+        }
+      </button>
+      <button type="button" class="note-menu-item note-menu-item--favourite" (click)="onToggleFavouriteMenu(note.id)">
+        @if (favouriteService.isNoteFavourite(note.id)) {
+          <app-icon-star-full class="icon-star-full--gold"></app-icon-star-full>
+        } @else {
+          <app-icon-star-empty></app-icon-star-empty>
+        }
+        <span>Favourites</span>
+      </button>
+      <div class="note-menu-divider"></div>
+      <button type="button" class="note-menu-item note-menu-item--danger" (click)="onDeleteNote(note)">
+        <app-icon-trash></app-icon-trash>
+        <span>Delete</span>
+      </button>
+    </div>
   }
 }

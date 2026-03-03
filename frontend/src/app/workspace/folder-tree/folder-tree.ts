@@ -1,26 +1,58 @@
 import { Component, OnInit, output, input } from '@angular/core';
 import { FoldersService, Folder } from '../../core/api/folders.service';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { DragDropModule, CdkDragDrop } from '@angular/cdk/drag-drop';
 import { FolderTreeItemComponent } from './folder-tree-item';
+import { IconFolderComponent } from '../icons/icon-folder';
 import { FolderDragService } from '../drag/folder-drag.service';
 
 /** Delay before showing loading message (avoids flicker on fast loads). */
 const LOADING_MESSAGE_DELAY_MS = 180;
+const DEFAULT_FOLDER_NAME = 'folder';
 
 @Component({
   selector: 'app-folder-tree',
   standalone: true,
-  imports: [CommonModule, DragDropModule, FolderTreeItemComponent],
+  imports: [CommonModule, FormsModule, DragDropModule, FolderTreeItemComponent, IconFolderComponent],
   templateUrl: './folder-tree.html',
   styleUrl: './folder-tree.scss',
 })
 export class FolderTreeComponent implements OnInit {
   selectFolder = output<number | null>();
+  /** Emits folder id when user chooses "Page" in inline create or folder's +. */
+  createNoteInFolder = output<number>();
+  /** Emitted when a new folder is created so parent can select it and start rename. */
+  folderCreated = output<Folder>();
+  /** Emitted when folder title is renamed. */
+  folderRenamed = output<{ folderId: number; newName: string }>();
+  /** Emitted when + is clicked on a folder row so parent can show inline create under that folder. */
+  startCreating = output<number>();
+  /** Emitted when user cancels inline create (Escape). */
+  cancelCreating = output<void>();
   /** When false, the "New folder" button is hidden (e.g. when using shared Create dropdown). */
   showCreateButton = input<boolean>(true);
   /** When set, only show this folder and its descendants (for space-scoped tree). */
   rootFolderId = input<number | null>(null);
+  /** When set, the folder with this id is shown as selected (highlights which folder's notes are shown). */
+  selectedFolderId = input<number | null>(null);
+  /** When set, show inline create row under this parent folder id (or root when equals rootFolderId). */
+  creatingUnderParentId = input<number | null>(null);
+  /** When set, the folder with this id shows its title in rename mode (input, focused, selected). */
+  folderIdBeingRenamed = input<number | null>(null);
+
+  /** Expose root folder id so parent can find this tree when there are multiple (e.g. sidebar spaces). */
+  getRootFolderId(): number | null {
+    return this.rootFolderId();
+  }
+
+  /** Refresh folder list (e.g. after creating from sidebar). */
+  refresh(): void {
+    this.foldersService.getTree().subscribe({
+      next: (list) => (this.folders = list),
+      error: () => {},
+    });
+  }
 
   folders: Folder[] = [];
   loading = true;
@@ -89,7 +121,7 @@ export class FolderTreeComponent implements OnInit {
     return this.folders.filter((f) => f.parent_id === null);
   }
 
-  /** Top-level folders to show in the tree. When scoped to a space, show only children of the root (root itself is hidden). */
+  /** Top-level folders to show in the tree. When scoped to a space, show only children of root (Content is the header above, not a row). */
   getTopLevelFolders(): Folder[] {
     const rootId = this.rootFolderId();
     if (rootId != null) return this.getChildren(rootId);
@@ -117,8 +149,11 @@ export class FolderTreeComponent implements OnInit {
     if (!title?.trim()) return;
     this.foldersService.create(parentId, title.trim()).subscribe({
       next: (created: Folder) => {
-        this.folders = [...this.folders, created];
-        this.selectFolder.emit(created.id);
+        // Refetch full tree so path/order are correct and all tree instances stay in sync if they share data
+        this.foldersService.getTree().subscribe((list) => {
+          this.folders = list;
+          this.selectFolder.emit(created.id);
+        });
       },
       error: () => alert('Failed to create folder'),
     });
@@ -126,5 +161,70 @@ export class FolderTreeComponent implements OnInit {
 
   onFolderDrop(event: { folderId: number; newParentId: number | null }): void {
     this.folderDragService.scheduleMove(event.folderId, event.newParentId);
+  }
+
+  onCreateNoteInFolder(folderId: number): void {
+    this.createNoteInFolder.emit(folderId);
+  }
+
+  /** Create folder with default name and emit folderCreated (for inline create). */
+  onCreateFolderWithDefault(parentId: number): void {
+    this.foldersService.create(parentId, DEFAULT_FOLDER_NAME).subscribe({
+      next: (created: Folder) => {
+        this.foldersService.getTree().subscribe((list) => {
+          this.folders = list;
+          this.selectFolder.emit(created.id);
+          this.folderCreated.emit(created);
+        });
+      },
+      error: () => alert('Failed to create folder'),
+    });
+  }
+
+  /** Inline create at root: "Folder" button. */
+  onInlineCreateFolderAtRoot(): void {
+    const parentId = this.creatingUnderParentId();
+    if (parentId != null) this.onCreateFolderWithDefault(parentId);
+    this.cancelInlineCreate();
+  }
+
+  readonly defaultFolderName = DEFAULT_FOLDER_NAME;
+
+  onStartCreating(parentId: number): void {
+    this.startCreating.emit(parentId);
+  }
+
+  /** Show inline create row at top level when creating under root. */
+  showInlineCreateAtRoot(): boolean {
+    const creating = this.creatingUnderParentId();
+    const rootId = this.rootFolderId();
+    return creating != null && rootId != null && Number(creating) === Number(rootId);
+  }
+
+  onInlineCreatePage(): void {
+    const parentId = this.creatingUnderParentId();
+    if (parentId != null) this.createNoteInFolder.emit(parentId);
+    this.cancelCreating.emit();
+  }
+
+  cancelInlineCreate(): void {
+    this.cancelCreating.emit();
+  }
+
+  onCancelCreating(): void {
+    this.cancelCreating.emit();
+  }
+
+  onFolderRenamed(payload: { folderId: number; newName: string }): void {
+    this.folderRenamed.emit(payload);
+  }
+
+  /** When a child item creates a folder, refresh tree and re-emit to parent. */
+  onFolderCreatedFromItem(created: Folder): void {
+    this.foldersService.getTree().subscribe((list) => {
+      this.folders = list;
+      this.selectFolder.emit(created.id);
+      this.folderCreated.emit(created);
+    });
   }
 }

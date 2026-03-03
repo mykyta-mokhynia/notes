@@ -3,11 +3,14 @@ import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../environments/environment';
 import { Observable } from 'rxjs';
 
+export type SpaceVisibility = 'PRIVATE' | 'PUBLIC';
+
 export interface Space {
   id: number;
   name: string;
   root_folder_id: number;
   about_note_id: string | null;
+  visibility?: SpaceVisibility;
   /** Present when listed from API (note count in this space). */
   note_count?: number;
 }
@@ -30,7 +33,7 @@ export class SpacesService {
     return this.http.post<Space>(BASE, { name });
   }
 
-  update(id: number, data: { name?: string }): Observable<Space> {
+  update(id: number, data: { name?: string; visibility?: SpaceVisibility }): Observable<Space> {
     return this.http.patch<Space>(`${BASE}/${id}`, data);
   }
 

@@ -14,10 +14,30 @@
         <app-folder-tree-item
           [folder]="f"
           [allFolders]="getVisibleFolders()"
+          [rootFolderId]="rootFolderId()"
+          [selectedFolderId]="selectedFolderId()"
+          [creatingUnderParentId]="creatingUnderParentId()"
+          [folderIdBeingRenamed]="folderIdBeingRenamed()"
           (folderClick)="onFolderClick($event)"
           (createSubfolder)="createFolder($event)"
+          (createNoteInFolder)="onCreateNoteInFolder($event)"
           (folderDrop)="onFolderDrop($event)"
+          (startCreating)="onStartCreating($event)"
+          (folderRenamed)="onFolderRenamed($event)"
+          (folderCreated)="onFolderCreatedFromItem($event)"
+          (cancelCreating)="onCancelCreating()"
+          (createFolderWithDefault)="onCreateFolderWithDefault($event)"
         ></app-folder-tree-item>
+      }
+      @if (showInlineCreateAtRoot()) {
+        <div class="inline-create-row inline-create-row--buttons">
+          <button type="button" class="inline-create-btn" (click)="onInlineCreateFolderAtRoot()">
+            <span class="inline-create-btn-icon"><app-icon-folder></app-icon-folder></span>
+            <span>Folder</span>
+          </button>
+          <button type="button" class="inline-create-btn inline-create-btn--link" (click)="onInlineCreatePage()">Page</button>
+          <button type="button" class="inline-create-btn inline-create-btn--cancel" (click)="cancelInlineCreate()">Cancel</button>
+        </div>
       }
     </div>
   </div>

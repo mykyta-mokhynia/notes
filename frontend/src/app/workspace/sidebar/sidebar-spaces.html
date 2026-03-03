@@ -69,7 +69,7 @@
                   <button
                     type="button"
                     class="content-create-btn"
-                    (click)="toggleContentCreate(space.id, $event)"
+                    (click)="toggleContentCreate(space.id, $event); $event.stopPropagation()"
                     title="Create folder or page"
                   >
                     <app-icon-plus></app-icon-plus>
@@ -80,15 +80,25 @@
                 <div class="space-tree-notes">
                   <app-folder-tree
                     [rootFolderId]="space.root_folder_id"
+                    [selectedFolderId]="selectedFolderId()"
+                    [creatingUnderParentId]="creatingUnderParentId()"
+                    [folderIdBeingRenamed]="folderIdBeingRenamed()"
                     [showCreateButton]="false"
                     (selectFolder)="onSelectFolder($event)"
+                    (createNoteInFolder)="onCreateNoteInFolder($event)"
+                    (folderCreated)="onFolderCreated($event)"
+                    (folderRenamed)="onFolderRenamed($event)"
+                    (startCreating)="creatingUnderParentId.set($event)"
+                    (cancelCreating)="creatingUnderParentId.set(null)"
                   ></app-folder-tree>
                   @if (selectedFolderId() !== null) {
                     <app-notes-list
                       [folderId]="selectedFolderId()!"
                       [showCreateButton]="false"
                       [excludeNoteId]="space.about_note_id ?? null"
+                      [noteIdBeingRenamed]="noteIdBeingRenamed()"
                       (selectNote)="onSelectNote($event)"
+                      (noteRenamed)="onNoteRenamed()"
                     ></app-notes-list>
                   }
                 </div>
@@ -106,12 +116,13 @@
         class="content-create-dropdown content-create-dropdown--fixed"
         [style.top.px]="pos.top"
         [style.left.px]="pos.left"
+        (click)="$event.stopPropagation()"
       >
-        <button type="button" class="content-create-dropdown-item" (click)="onCreateFolder()">
+        <button type="button" class="content-create-dropdown-item" (click)="onCreateFolder(); $event.stopPropagation()">
           <span class="content-create-dropdown-icon"><app-icon-folder></app-icon-folder></span>
           <span>Folder</span>
         </button>
-        <button type="button" class="content-create-dropdown-item" (click)="onCreateNote()" [disabled]="selectedFolderId() === null">
+        <button type="button" class="content-create-dropdown-item" (click)="onCreateNote(); $event.stopPropagation()">
           <span class="content-create-dropdown-icon"><app-icon-page></app-icon-page></span>
           <span>Page</span>
         </button>
@@ -130,9 +141,18 @@
           <app-icon-edit></app-icon-edit>
           <span>Edit</span>
         </button>
-        <button type="button" class="space-menu-item" (click)="onToggleFavourite(space.id)">
+        <button type="button" class="space-menu-item" (click)="onToggleVisibility(space)">
+          @if (space.visibility === 'PUBLIC') {
+            <span class="space-menu-item-icon-wrap"><app-icon-eye-slash></app-icon-eye-slash></span>
+            <span>Make space private</span>
+          } @else {
+            <span class="space-menu-item-icon-wrap"><app-icon-eye></app-icon-eye></span>
+            <span>Make space public</span>
+          }
+        </button>
+        <button type="button" class="space-menu-item space-menu-item--favourite" (click)="onToggleFavourite(space.id)">
           @if (favouriteService.isSpaceFavourite(space.id)) {
-            <app-icon-star-full></app-icon-star-full>
+            <app-icon-star-full class="icon-star-full--gold"></app-icon-star-full>
           } @else {
             <app-icon-star-empty></app-icon-star-empty>
           }

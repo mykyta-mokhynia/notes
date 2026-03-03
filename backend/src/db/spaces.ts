@@ -1,9 +1,9 @@
 import { query } from './index';
 import * as foldersDb from './folders';
 import * as notesDb from './notes';
-import type { Space, SpaceRow } from '../types';
+import type { Space, SpaceRow, NoteVisibility } from '../types';
 
-const COLS = 'id, name, root_folder_id, about_note_id';
+const COLS = 'id, name, root_folder_id, about_note_id, visibility';
 
 function rowToSpace(r: SpaceRow): Space {
   return {
@@ -11,6 +11,7 @@ function rowToSpace(r: SpaceRow): Space {
     name: r.name,
     root_folder_id: r.root_folder_id,
     about_note_id: r.about_note_id,
+    visibility: r.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
   };
 }
 
@@ -28,7 +29,7 @@ export interface SpaceWithNoteCount extends Space {
 /** List spaces with note count per space (notes in root folder and all descendants). */
 export async function listSpacesWithNoteCount(): Promise<SpaceWithNoteCount[]> {
   const { rows } = await query<SpaceRow & { note_count: number }>(
-    `SELECT s.id, s.name, s.root_folder_id, s.about_note_id,
+    `SELECT s.id, s.name, s.root_folder_id, s.about_note_id, s.visibility,
             (SELECT count(*)::int FROM notes n
              INNER JOIN folders f ON n.folder_id = f.id
              WHERE f.path IS NOT NULL AND f.path <@ (SELECT path FROM folders WHERE id = s.root_folder_id)::ltree) AS note_count
@@ -76,12 +77,24 @@ export async function createSpace(name: string): Promise<Space> {
 
 export async function updateSpace(
   id: number,
-  data: { name?: string }
+  data: { name?: string; visibility?: NoteVisibility }
 ): Promise<Space | null> {
-  if (data.name === undefined) return getSpaceById(id);
+  if (data.name === undefined && data.visibility === undefined) return getSpaceById(id);
+  const updates: string[] = [];
+  const values: unknown[] = [];
+  let i = 1;
+  if (data.name !== undefined) {
+    updates.push(`name = $${i++}`);
+    values.push(data.name.trim());
+  }
+  if (data.visibility === 'PUBLIC' || data.visibility === 'PRIVATE') {
+    updates.push(`visibility = $${i++}`);
+    values.push(data.visibility);
+  }
+  values.push(id);
   const { rows } = await query<SpaceRow>(
-    `UPDATE spaces SET name = $1 WHERE id = $2 RETURNING ${COLS}`,
-    [data.name.trim(), id]
+    `UPDATE spaces SET ${updates.join(', ')} WHERE id = $${i} RETURNING ${COLS}`,
+    values
   );
   return rows[0] ? rowToSpace(rows[0]) : null;
 }

@@ -43,9 +43,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'INVALID_ID' });
     return;
   }
-  const { name } = req.body;
-  const data: { name?: string } = {};
+  const { name, visibility } = req.body;
+  const data: { name?: string; visibility?: 'PRIVATE' | 'PUBLIC' } = {};
   if (typeof name === 'string') data.name = name.trim();
+  if (visibility === 'PUBLIC' || visibility === 'PRIVATE') data.visibility = visibility;
   const space = await spacesDb.updateSpace(id, data);
   if (!space) {
     res.status(404).json({ error: 'NOT_FOUND' });

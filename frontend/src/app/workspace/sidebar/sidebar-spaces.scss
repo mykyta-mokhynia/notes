@@ -106,6 +106,7 @@
 
 .spaces-list {
   padding-top: 0.25rem;
+  padding-left: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
@@ -222,7 +223,7 @@
   border: 1px solid var(--border-color, #e0e0e0);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-  min-width: 180px;
+  min-width: 220px;
 }
 
 .space-context-menu--fixed {
@@ -248,6 +249,19 @@
   background: var(--hover-bg, #f0f0f0);
 }
 
+.space-menu-item-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.space-menu-item--favourite .icon-star-full--gold {
+  color: #c9a227;
+}
+
 .space-menu-item--danger {
   color: var(--danger-color, #c00);
 }
@@ -265,7 +279,8 @@
 }
 
 .space-content {
-  padding-left: calc(0.5rem + 0.75rem);
+  margin-left: 0.25rem;
+  padding-left: 0.25rem;
   border-left: 1px solid var(--border-color, #e8e8e8);
 }
 
@@ -349,6 +364,8 @@
 
 .content-create-wrap {
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 
 .content-create-btn {
@@ -363,6 +380,9 @@
   cursor: pointer;
   color: var(--text-color, #111);
   border-radius: 4px;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
 }
 
 .content-create-btn:hover {
@@ -415,6 +435,13 @@
 }
 
 .space-tree-notes {
-  padding-top: 0.25rem;
+  --tree-indent: 10px;
+  padding-left: 1.25rem;
   padding-bottom: 0.5rem;
+}
+
+.space-tree-notes app-folder-tree,
+.space-tree-notes app-notes-list {
+  display: block;
+  width: 100%;
 }

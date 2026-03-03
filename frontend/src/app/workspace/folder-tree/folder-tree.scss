@@ -1,5 +1,5 @@
 .tree {
-  margin-bottom: 0.5rem;
+  margin-bottom: 0;
 }
 
 .loading,
@@ -23,4 +23,67 @@
 
 .btn-add:hover {
   color: var(--text-color, #333);
+}
+
+.inline-create-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2rem;
+  padding: 0.2rem 0.35rem;
+  margin: 0.1rem 0;
+}
+
+.inline-create-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.875rem;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 4px;
+  background: var(--bg-color, #fff);
+  color: var(--text-color, #111);
+}
+
+.inline-create-input:focus {
+  outline: none;
+  border-color: var(--focus-color, #1976d2);
+}
+
+.inline-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-button, #e0e0e0);
+  color: var(--text-color, #111);
+  cursor: pointer;
+}
+
+.inline-create-btn-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.inline-create-btn:hover {
+  background: var(--hover-bg, #d0d0d0);
+}
+
+.inline-create-btn--link {
+  background: none;
+  color: var(--focus-color, #1976d2);
+}
+
+.inline-create-btn--link:hover {
+  text-decoration: underline;
+}
+
+.inline-create-btn--cancel {
+  background: none;
+  color: var(--text-muted, #666);
 }

@@ -5,29 +5,89 @@
   [cdkDropListData]="{ parentId: folder().id }"
   (cdkDropListDropped)="onDrop($event)"
 >
-  <div class="folder-row" cdkDrag [cdkDragData]="folder()" (click)="onClick()" data-drag-type="folder">
-    <button type="button" class="btn-fav" (click)="onToggleFavourite($event)" [title]="favouriteService.isFolderFavourite(folder().id) ? 'Remove from favourites' : 'Add to favourites'">
-      {{ favouriteService.isFolderFavourite(folder().id) ? '★' : '☆' }}
-    </button>
-    <span class="folder-title">{{ folder().title }}</span>
-    <button
-      type="button"
-      class="btn-add-child"
-      (click)="onAddChild($event)"
-      title="New subfolder"
+  <div class="folder-row-wrap">
+    <div
+      class="folder-row"
+      cdkDrag
+      [cdkDragData]="folder()"
+      (click)="onClick()"
+      (mouseenter)="rowHovered.set(true)"
+      (mouseleave)="rowHovered.set(false)"
+      data-drag-type="folder"
+      [class.folder-row--expanded]="hasChildren() && expanded()"
+      [class.folder-row--selected]="selectedFolderId() !== null && folder().id === selectedFolderId()"
     >
-      +
-    </button>
+      <span class="folder-row-icon">
+        @if (hasChildren() && rowHovered()) {
+          <span class="folder-row-icon-inner">
+            @if (expanded()) {
+              <app-icon-chevron-down></app-icon-chevron-down>
+            } @else {
+              <app-icon-chevron-right></app-icon-chevron-right>
+            }
+          </span>
+        } @else {
+          <span class="folder-row-icon-inner">
+            <app-icon-folder></app-icon-folder>
+          </span>
+        }
+      </span>
+      @if (isRenaming()) {
+        <input
+          #renameInput
+          type="text"
+          class="folder-rename-input"
+          [ngModel]="renameTitle"
+          (ngModelChange)="renameTitle = $event"
+          (keydown.enter)="submitRename()"
+          (keydown.escape)="cancelRename()"
+          (blur)="submitRename()"
+          (click)="$event.stopPropagation()"
+        />
+      } @else {
+        <span class="folder-title">{{ getFolderTitle() }}</span>
+      }
+    </div>
+    <div class="folder-create-wrap" (click)="$event.stopPropagation()">
+      <button
+        type="button"
+        class="folder-create-btn"
+        (mousedown)="onPlusClick($event)"
+        (click)="$event.stopPropagation()"
+        title="Create folder or page"
+      >
+        <app-icon-plus></app-icon-plus>
+      </button>
+    </div>
   </div>
-  @if (getChildren(folder().id).length > 0) {
+  @if (showInlineCreateHere()) {
+    <div class="inline-create-row inline-create-row--buttons">
+      <button type="button" class="inline-create-btn" (click)="onInlineCreateFolder()">
+        <span class="inline-create-btn-icon"><app-icon-folder></app-icon-folder></span>
+        <span>Folder</span>
+      </button>
+      <button type="button" class="inline-create-btn inline-create-btn--link" (click)="onInlineCreatePage()">Page</button>
+      <button type="button" class="inline-create-btn inline-create-btn--cancel" (click)="cancelInlineCreate()">Cancel</button>
+    </div>
+  }
+  @if (hasChildren() && expanded()) {
     <div class="children">
       @for (child of getChildren(folder().id); track child.id) {
         <app-folder-tree-item
           [folder]="child"
           [allFolders]="allFolders()"
+          [rootFolderId]="rootFolderId()"
+          [selectedFolderId]="selectedFolderId()"
+          [creatingUnderParentId]="creatingUnderParentId()"
+          [folderIdBeingRenamed]="folderIdBeingRenamed()"
           (folderClick)="folderClick.emit($event)"
           (createSubfolder)="createSubfolder.emit($event)"
+          (createNoteInFolder)="createNoteInFolder.emit($event)"
           (folderDrop)="folderDrop.emit($event)"
+          (startCreating)="startCreating.emit($event)"
+          (folderCreated)="folderCreated.emit($event)"
+          (folderRenamed)="folderRenamed.emit($event)"
+          (cancelCreating)="cancelCreating.emit()"
         ></app-folder-tree-item>
       }
     </div>
