@@ -11,6 +11,7 @@ export interface Space {
   root_folder_id: number;
   about_note_id: string | null;
   visibility?: SpaceVisibility;
+  avatar_key?: number;
   /** Present when listed from API (note count in this space). */
   note_count?: number;
 }
@@ -29,11 +30,11 @@ export class SpacesService {
     return this.http.get<Space>(`${BASE}/${id}`);
   }
 
-  create(name: string): Observable<Space> {
-    return this.http.post<Space>(BASE, { name });
+  create(name: string, avatarKey = 1): Observable<Space> {
+    return this.http.post<Space>(BASE, { name, avatar_key: avatarKey });
   }
 
-  update(id: number, data: { name?: string; visibility?: SpaceVisibility }): Observable<Space> {
+  update(id: number, data: { name?: string; visibility?: SpaceVisibility; avatar_key?: number }): Observable<Space> {
     return this.http.patch<Space>(`${BASE}/${id}`, data);
   }
 

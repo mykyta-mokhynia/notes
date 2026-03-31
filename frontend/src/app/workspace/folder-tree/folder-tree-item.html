@@ -3,6 +3,10 @@
   cdkDropList
   [id]="'folder-' + folder().id"
   [cdkDropListData]="{ parentId: folder().id }"
+  [cdkDropListDisabled]="!access.canDrag()"
+  [cdkDropListEnterPredicate]="canReceiveFolderItemDrag"
+  (cdkDropListEntered)="onDragEntered($event)"
+  (cdkDropListExited)="onDragExited()"
   (cdkDropListDropped)="onDrop($event)"
 >
   <div class="folder-row-wrap">
@@ -10,6 +14,7 @@
       class="folder-row"
       cdkDrag
       [cdkDragData]="folder()"
+      [cdkDragDisabled]="!access.canDrag()"
       (click)="onClick()"
       (mouseenter)="rowHovered.set(true)"
       (mouseleave)="rowHovered.set(false)"
@@ -47,6 +52,7 @@
         <span class="folder-title">{{ getFolderTitle() }}</span>
       }
     </div>
+    @if (access.canEdit()) {
     <div class="folder-create-wrap" (click)="$event.stopPropagation()">
       <button
         type="button"
@@ -58,8 +64,9 @@
         <app-icon-plus></app-icon-plus>
       </button>
     </div>
+    }
   </div>
-  @if (createDropdownOpen()) {
+  @if (access.canEdit() && createDropdownOpen()) {
     @if (createDropdownPosition(); as pos) {
       <div
         class="folder-create-dropdown folder-create-dropdown--fixed"
@@ -77,7 +84,7 @@
       </div>
     }
   }
-  @if (showInlineCreateHere()) {
+  @if (access.canEdit() && showInlineCreateHere()) {
     <div class="inline-create-row inline-create-row--buttons">
       <button type="button" class="inline-create-btn" (click)="onInlineCreateFolder()">
         <span class="inline-create-btn-icon"><app-icon-folder></app-icon-folder></span>

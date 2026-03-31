@@ -1,6 +1,7 @@
 import {
   Component,
   OnInit,
+  inject,
   output,
   viewChildren,
   signal,
@@ -9,6 +10,7 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
+import { DragDropModule } from '@angular/cdk/drag-drop';
 import { forkJoin } from 'rxjs';
 import { SpacesService, Space } from '../../core/api/spaces.service';
 import { FoldersService, type Folder } from '../../core/api/folders.service';
@@ -25,7 +27,8 @@ import { IconEditComponent } from '../icons/icon-edit';
 import { IconTrashComponent } from '../icons/icon-trash';
 import { IconStarEmptyComponent } from '../icons/icon-star-empty';
 import { IconStarFullComponent } from '../icons/icon-star-full';
-import { IconPlanetRingComponent } from '../icons/icon-planet-ring';
+import { IconDocsComponent } from '../icons/icon-docs';
+import { IconSpaceAvatarComponent } from '../icons/icon-space-avatar';
 import { IconEyeSlashComponent } from '../icons/icon-eye-slash';
 import { IconEyeComponent } from '../icons/icon-eye';
 import { IconFolderComponent } from '../icons/icon-folder';
@@ -33,12 +36,14 @@ import { CreateSpaceModalComponent } from './create-space-modal/create-space-mod
 import { EditSpaceModalComponent } from './edit-space-modal/edit-space-modal';
 import { DeleteSpaceModalComponent } from './delete-space-modal/delete-space-modal';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
+import { ViewerAccessService } from '../../core/access/viewer-access.service';
 
 @Component({
   selector: 'app-sidebar-spaces',
   standalone: true,
   imports: [
     CommonModule,
+    DragDropModule,
     FolderTreeComponent,
     NotesListComponent,
     IconPlusComponent,
@@ -51,7 +56,8 @@ import { FavouriteService } from '../../core/sidebar/favourite.service';
     IconTrashComponent,
     IconStarEmptyComponent,
     IconStarFullComponent,
-    IconPlanetRingComponent,
+    IconDocsComponent,
+    IconSpaceAvatarComponent,
     IconEyeSlashComponent,
     IconEyeComponent,
     IconFolderComponent,
@@ -63,6 +69,7 @@ import { FavouriteService } from '../../core/sidebar/favourite.service';
   styleUrl: './sidebar-spaces.scss',
 })
 export class SidebarSpacesComponent implements OnInit {
+  protected readonly access = inject(ViewerAccessService);
   selectNote = output<string>();
 
   spaces = signal<Space[]>([]);
@@ -297,13 +304,16 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   openCreateSpaceModal(): void {
+    if (!this.access.canEdit()) return;
     this.createSpaceError.set(null);
     this.showCreateSpaceModal.set(true);
   }
 
-  onCreateSpaceName(name: string): void {
+  onCreateSpaceName(payload: { name: string; avatarKey: number }): void {
+    if (!this.access.canEdit()) return;
+    const { name, avatarKey } = payload;
     this.createSpaceError.set(null);
-    this.spacesService.create(name).subscribe({
+    this.spacesService.create(name, avatarKey).subscribe({
       next: (space) => {
         this.showCreateSpaceModal.set(false);
         this.spaces.update((list) => [...list, space]);
@@ -351,6 +361,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   toggleContentCreate(space: Space, event: Event): void {
+    if (!this.access.canEdit()) return;
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
     const rect = btn?.getBoundingClientRect();
     if (this.contentCreateOpenSpaceId() === space.id) {
@@ -373,6 +384,7 @@ export class SidebarSpacesComponent implements OnInit {
   private readonly defaultFolderName = 'folder';
 
   onCreateFolder(): void {
+    if (!this.access.canEdit()) return;
     const parentId = this.contentCreateParentFolderId();
     if (parentId == null) return;
     this.foldersService.create(parentId, this.defaultFolderName).subscribe({
@@ -394,6 +406,7 @@ export class SidebarSpacesComponent implements OnInit {
   private readonly defaultNoteTitle = 'note';
 
   onCreateNote(): void {
+    if (!this.access.canEdit()) return;
     const folderId = this.contentCreateParentFolderId();
     if (folderId == null) return;
     this.notesService.create(folderId, this.defaultNoteTitle).subscribe({
@@ -424,6 +437,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onCreateNoteInFolder(folderId: number): void {
+    if (!this.access.canEdit()) return;
     this.notesService.create(folderId, this.defaultNoteTitle).subscribe({
       next: (created) => {
         this.selectedFolderId.set(folderId);
@@ -445,6 +459,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   toggleSpaceMenu(spaceId: number, event: Event): void {
+    if (!this.access.canEdit()) return;
     event.stopPropagation();
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
     const rect = btn?.getBoundingClientRect();
@@ -460,6 +475,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onEditSpace(space: Space): void {
+    if (!this.access.canEdit()) return;
     this.spaceMenuOpenId.set(null);
     this.spaceMenuPosition.set(null);
     this.editSpaceError.set(null);
@@ -467,6 +483,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onToggleVisibility(space: Space): void {
+    if (!this.access.canEdit()) return;
     const next = space.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC';
     this.spacesService.update(space.id, { visibility: next }).subscribe({
       next: (updated) => {
@@ -479,12 +496,18 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onToggleFavourite(spaceId: number): void {
-    this.favouriteService.toggleSpace(spaceId);
+    if (!this.access.canEdit()) return;
+    const result = this.favouriteService.toggleSpace(spaceId);
+    if (result === 'limit_reached') {
+      alert('Favourite limit reached (max 10 items). Remove one favourite and try again.');
+      return;
+    }
     this.spaceMenuOpenId.set(null);
     this.spaceMenuPosition.set(null);
   }
 
   onDeleteSpace(space: Space): void {
+    if (!this.access.canEdit()) return;
     this.spaceMenuOpenId.set(null);
     this.spaceMenuPosition.set(null);
     this.deleteSpaceId.set(space.id);
@@ -495,11 +518,13 @@ export class SidebarSpacesComponent implements OnInit {
     this.spaceMenuPosition.set(null);
   }
 
-  onUpdateSpaceName(name: string): void {
+  onUpdateSpaceName(payload: { name: string; avatarKey: number }): void {
+    if (!this.access.canEdit()) return;
     const id = this.editSpaceId();
     if (id == null) return;
+    const { name, avatarKey } = payload;
     this.editSpaceError.set(null);
-    this.spacesService.update(id, { name: name.trim() }).subscribe({
+    this.spacesService.update(id, { name: name.trim(), avatar_key: avatarKey }).subscribe({
       next: (updated) => {
         this.spaces.update((list) => list.map((s) => (s.id === updated.id ? updated : s)));
         this.editSpaceId.set(null);
@@ -514,6 +539,7 @@ export class SidebarSpacesComponent implements OnInit {
   }
 
   onConfirmDeleteSpace(): void {
+    if (!this.access.canEdit()) return;
     const id = this.deleteSpaceId();
     if (id == null) return;
     this.spacesService.delete(id).subscribe({

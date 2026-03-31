@@ -1,11 +1,12 @@
-import { Component, OnInit, output, input } from '@angular/core';
+import { Component, OnInit, output, input, inject } from '@angular/core';
 import { FoldersService, Folder } from '../../core/api/folders.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DragDropModule, CdkDragDrop } from '@angular/cdk/drag-drop';
+import { DragDropModule, CdkDrag, CdkDragDrop } from '@angular/cdk/drag-drop';
 import { FolderTreeItemComponent } from './folder-tree-item';
 import { IconFolderComponent } from '../icons/icon-folder';
 import { FolderDragService } from '../drag/folder-drag.service';
+import { ViewerAccessService } from '../../core/access/viewer-access.service';
 
 /** Delay before showing loading message (avoids flicker on fast loads). */
 const LOADING_MESSAGE_DELAY_MS = 180;
@@ -19,6 +20,7 @@ const DEFAULT_FOLDER_NAME = 'folder';
   styleUrl: './folder-tree.scss',
 })
 export class FolderTreeComponent implements OnInit {
+  protected readonly access = inject(ViewerAccessService);
   selectFolder = output<number | null>();
   selectNote = output<string>();
   /** Emits folder id when user chooses "Page" in inline create or folder's +. */
@@ -136,10 +138,24 @@ export class FolderTreeComponent implements OnInit {
   }
 
   onRootDrop(event: CdkDragDrop<{ parentId: null }, Folder>): void {
+    if (!this.access.canDrag()) return;
     const folder = event.item?.data;
     if (!folder) return;
     const rootId = this.rootFolderId();
     this.folderDragService.scheduleMove(folder.id, rootId ?? null);
+  }
+
+  canReceiveRootFolderDrag = (drag: CdkDrag<unknown>): boolean => {
+    return this.access.canDrag() && this.isFolderDragData(drag.data);
+  };
+
+  private isFolderDragData(data: unknown): data is Folder {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'parent_id' in data &&
+      'path' in data
+    );
   }
 
   getChildren(parentId: number): Folder[] {
@@ -160,6 +176,7 @@ export class FolderTreeComponent implements OnInit {
 
   /** Public for workspace Create dropdown. */
   createFolder(parentId: number | null): void {
+    if (!this.access.canEdit()) return;
     const title = prompt('Folder name');
     if (!title?.trim()) return;
     this.foldersService.create(parentId, title.trim()).subscribe({
@@ -175,15 +192,18 @@ export class FolderTreeComponent implements OnInit {
   }
 
   onFolderDrop(event: { folderId: number; newParentId: number | null }): void {
+    if (!this.access.canDrag()) return;
     this.folderDragService.scheduleMove(event.folderId, event.newParentId);
   }
 
   onCreateNoteInFolder(folderId: number): void {
+    if (!this.access.canEdit()) return;
     this.createNoteInFolder.emit(folderId);
   }
 
   /** Create folder with default name and emit folderCreated (for inline create). */
   onCreateFolderWithDefault(parentId: number): void {
+    if (!this.access.canEdit()) return;
     this.foldersService.create(parentId, DEFAULT_FOLDER_NAME).subscribe({
       next: (created: Folder) => {
         this.foldersService.getTree().subscribe((list) => {
@@ -197,6 +217,7 @@ export class FolderTreeComponent implements OnInit {
 
   /** Inline create at root: "Folder" button. */
   onInlineCreateFolderAtRoot(): void {
+    if (!this.access.canEdit()) return;
     const parentId = this.creatingUnderParentId();
     if (parentId != null) this.onCreateFolderWithDefault(parentId);
     this.cancelInlineCreate();
@@ -205,6 +226,7 @@ export class FolderTreeComponent implements OnInit {
   readonly defaultFolderName = DEFAULT_FOLDER_NAME;
 
   onStartCreating(parentId: number): void {
+    if (!this.access.canEdit()) return;
     this.startCreating.emit(parentId);
   }
 
@@ -216,6 +238,7 @@ export class FolderTreeComponent implements OnInit {
   }
 
   onInlineCreatePage(): void {
+    if (!this.access.canEdit()) return;
     const parentId = this.creatingUnderParentId();
     if (parentId != null) this.createNoteInFolder.emit(parentId);
     this.cancelCreating.emit();

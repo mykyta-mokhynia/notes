@@ -2,7 +2,8 @@ import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
 const STORAGE_KEY = 'notes_recent';
-const MAX_ITEMS = 15;
+export const MAX_RECENT_ITEMS = 50;
+export const SIDEBAR_RECENT_ITEMS = 6;
 
 export interface RecentItem {
   id: string;
@@ -16,12 +17,39 @@ export class RecentService {
   /** Emit after add to refresh sidebar list. */
   readonly refresh$ = new Subject<void>();
 
+  private normalize(items: RecentItem[]): RecentItem[] {
+    const sorted = [...items].sort((a, b) => b.openedAt - a.openedAt);
+    const unique: RecentItem[] = [];
+    const seenIds = new Set<string>();
+
+    for (const item of sorted) {
+      if (seenIds.has(item.id)) continue;
+      seenIds.add(item.id);
+      unique.push(item);
+      if (unique.length >= MAX_RECENT_ITEMS) break;
+    }
+
+    return unique;
+  }
+
   private load(): RecentItem[] {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
-      const parsed = JSON.parse(raw) as RecentItem[];
-      return Array.isArray(parsed) ? parsed : [];
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) return [];
+      const validItems = parsed
+        .filter((item): item is RecentItem => {
+          const typed = item as Partial<RecentItem>;
+          return (
+            typeof typed?.id === 'string' &&
+            typeof typed?.title === 'string' &&
+            typeof typed?.openedAt === 'number'
+          );
+        });
+      const normalizedItems = this.normalize(validItems);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizedItems));
+      return normalizedItems;
     } catch {
       return [];
     }
@@ -33,15 +61,43 @@ export class RecentService {
     } catch {}
   }
 
-  getItems(): RecentItem[] {
+  private ensureNormalized(): void {
+    const normalized = this.normalize(this.items);
+    if (normalized.length !== this.items.length) {
+      this.items = normalized;
+      this.save();
+      return;
+    }
+    for (let i = 0; i < normalized.length; i += 1) {
+      const prev = this.items[i];
+      const next = normalized[i];
+      if (
+        prev?.id !== next?.id ||
+        prev?.title !== next?.title ||
+        prev?.openedAt !== next?.openedAt
+      ) {
+        this.items = normalized;
+        this.save();
+        return;
+      }
+    }
+  }
+
+  getItems(limit?: number): RecentItem[] {
+    this.ensureNormalized();
+    if (typeof limit === 'number' && limit > 0) {
+      return this.items.slice(0, limit);
+    }
     return [...this.items];
   }
 
   add(noteId: string, title: string): void {
     const now = Date.now();
-    this.items = this.items.filter((i) => i.id !== noteId);
-    this.items.unshift({ id: noteId, title: title || 'Untitled', openedAt: now });
-    if (this.items.length > MAX_ITEMS) this.items = this.items.slice(0, MAX_ITEMS);
+    const candidateItems = [
+      { id: noteId, title: title || 'Untitled', openedAt: now },
+      ...this.items,
+    ];
+    this.items = this.normalize(candidateItems);
     this.save();
     this.refresh$.next();
   }

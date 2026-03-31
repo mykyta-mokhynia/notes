@@ -9,11 +9,12 @@ import {
   HostListener,
   ViewChild,
   ElementRef,
+  inject,
 } from '@angular/core';
 import { NotesService, Note } from '../../core/api/notes.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { CdkDragDrop, DragDropModule, moveItemInArray } from '@angular/cdk/drag-drop';
+import { CdkDrag, CdkDragDrop, DragDropModule, moveItemInArray, transferArrayItem } from '@angular/cdk/drag-drop';
 import { NoteDragService } from '../drag/note-drag.service';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { IconContentComponent } from '../icons/icon-content';
@@ -23,9 +24,14 @@ import { IconEyeComponent } from '../icons/icon-eye';
 import { IconStarEmptyComponent } from '../icons/icon-star-empty';
 import { IconStarFullComponent } from '../icons/icon-star-full';
 import { IconTrashComponent } from '../icons/icon-trash';
+import { ViewerAccessService } from '../../core/access/viewer-access.service';
+import { NoteUnsavedChangesService } from '../note-editor/note-unsaved-changes.service';
 
 /** Delay before showing loading message (avoids flicker on fast loads). */
 const LOADING_MESSAGE_DELAY_MS = 180;
+const MENU_MARGIN_PX = 8;
+const MENU_WIDTH_PX = 220;
+const MENU_HEIGHT_PX = 180;
 
 @Component({
   selector: 'app-notes-list',
@@ -47,6 +53,7 @@ const LOADING_MESSAGE_DELAY_MS = 180;
   styleUrl: './notes-list.scss',
 })
 export class NotesListComponent {
+  protected readonly access = inject(ViewerAccessService);
   folderId = input.required<number>();
   selectNote = output<string>();
   /** When false, the "New note" button is hidden (e.g. when using shared Create dropdown). */
@@ -90,7 +97,8 @@ export class NotesListComponent {
   constructor(
     private notesService: NotesService,
     private noteDragService: NoteDragService,
-    public favouriteService: FavouriteService
+    public favouriteService: FavouriteService,
+    private noteUnsavedChanges: NoteUnsavedChangesService
   ) {
     effect(() => {
       const id = this.folderId();
@@ -115,6 +123,7 @@ export class NotesListComponent {
   }
 
   toggleNoteMenu(noteId: string, event: Event): void {
+    if (!this.access.canEdit()) return;
     event.stopPropagation();
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
     const rect = btn?.getBoundingClientRect();
@@ -123,11 +132,45 @@ export class NotesListComponent {
       this.noteMenuPosition.set(null);
     } else {
       this.noteMenuOpenId.set(noteId);
-      this.noteMenuPosition.set(rect ? { top: rect.bottom + 4, left: rect.left } : null);
+      this.noteMenuPosition.set(rect ? this.getSafeMenuPosition(rect) : null);
     }
   }
 
-  onToggleVisibility(note: Note): void {
+  private getSafeMenuPosition(rect: DOMRect): { top: number; left: number } {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    const maxLeft = Math.max(MENU_MARGIN_PX, viewportWidth - MENU_WIDTH_PX - MENU_MARGIN_PX);
+    const desiredLeft = rect.left;
+    const safeLeft = Math.min(Math.max(desiredLeft, MENU_MARGIN_PX), maxLeft);
+
+    const desiredTop = rect.bottom + 4;
+    const flipTop = rect.top - MENU_HEIGHT_PX - 4;
+    const maxTop = Math.max(MENU_MARGIN_PX, viewportHeight - MENU_HEIGHT_PX - MENU_MARGIN_PX);
+    const safeTop = desiredTop > maxTop ? Math.max(flipTop, MENU_MARGIN_PX) : Math.max(desiredTop, MENU_MARGIN_PX);
+
+    return { top: safeTop, left: safeLeft };
+  }
+
+  async onToggleVisibility(note: Note): Promise<void> {
+    if (!this.access.canEdit()) return;
+    const unsaved = this.noteUnsavedChanges.getState(note.id);
+    if (unsaved.saving) {
+      alert('This page is still saving. Try publishing again in a moment.');
+      return;
+    }
+    if (unsaved.dirty) {
+      const saved = await this.noteUnsavedChanges.flushNote(note.id);
+      if (!saved) {
+        alert(
+          this.noteUnsavedChanges.getState(note.id).error ||
+            (this.noteUnsavedChanges.hasDraft(note.id)
+              ? 'This page has a local unsaved draft. Open it, let the draft restore, then save before publishing.'
+              : 'Save the current changes before publishing this page.')
+        );
+        return;
+      }
+    }
     const next = note.visibility === 'PUBLIC' ? 'PRIVATE' : 'PUBLIC';
     this.notesService.update(note.id, { visibility: next }).subscribe({
       next: (updated) => {
@@ -141,12 +184,18 @@ export class NotesListComponent {
   }
 
   onToggleFavouriteMenu(noteId: string): void {
-    this.favouriteService.toggleNote(noteId);
+    if (!this.access.canEdit()) return;
+    const result = this.favouriteService.toggleNote(noteId);
+    if (result === 'limit_reached') {
+      alert('Favourite limit reached (max 10 items). Remove one favourite and try again.');
+      return;
+    }
     this.noteMenuOpenId.set(null);
     this.noteMenuPosition.set(null);
   }
 
   onDeleteNote(note: Note): void {
+    if (!this.access.canEdit()) return;
     if (!confirm('Delete this note?')) return;
     this.notesService.delete(note.id).subscribe({
       next: () => {
@@ -159,12 +208,30 @@ export class NotesListComponent {
   }
 
   onNoteDrop(event: CdkDragDrop<Note[]>): void {
-    if (event.previousContainer !== event.container) return;
-    moveItemInArray(this.notes, event.previousIndex, event.currentIndex);
+    if (!this.access.canDrag()) return;
+
+    if (event.previousContainer === event.container) {
+      if (event.previousIndex === event.currentIndex) return;
+      moveItemInArray(this.notes, event.previousIndex, event.currentIndex);
+    } else {
+      transferArrayItem(
+        event.previousContainer.data,
+        event.container.data,
+        event.previousIndex,
+        event.currentIndex
+      );
+    }
+
     const note = event.item.data as Note;
-    const newPosition = String(event.currentIndex + 1);
+    note.folder_id = this.folderId();
+    const newPosition = this.computePositionForIndex(event.currentIndex);
+    note.position = newPosition;
     this.noteDragService.scheduleMove(note.id, this.folderId(), newPosition);
   }
+
+  canReceiveNoteDrag = (drag: CdkDrag<unknown>): boolean => {
+    return this.access.canDrag() && this.isNoteDragData(drag.data);
+  };
 
   /** Reload notes. If folderId is passed, load that folder (e.g. after creating a note in that folder). */
   refresh(folderId?: number): void {
@@ -207,6 +274,7 @@ export class NotesListComponent {
   }
 
   submitNoteRename(note: Note): void {
+    if (!this.access.canEdit()) return;
     const newTitle = (this.renameTitle || note.title).trim();
     if (newTitle && newTitle !== note.title) {
       this.notesService.update(note.id, { title: newTitle }).subscribe({
@@ -227,6 +295,7 @@ export class NotesListComponent {
   }
 
   onCreateNote(): void {
+    if (!this.access.canEdit()) return;
     const title = prompt('Note title');
     if (!title?.trim()) return;
     this.notesService.create(this.folderId(), title.trim()).subscribe({
@@ -236,5 +305,42 @@ export class NotesListComponent {
       },
       error: () => alert('Failed to create note'),
     });
+  }
+
+  private computePositionForIndex(index: number): string {
+    const prev = index > 0 ? this.notes[index - 1] : null;
+    const next = index < this.notes.length - 1 ? this.notes[index + 1] : null;
+
+    if (prev && next) {
+      return String(
+        (this.toPositionNumber(prev.position, index) +
+          this.toPositionNumber(next.position, index + 2)) /
+          2
+      );
+    }
+
+    if (prev) {
+      return String(this.toPositionNumber(prev.position, index) + 1);
+    }
+
+    if (next) {
+      return String(this.toPositionNumber(next.position, 2) - 1);
+    }
+
+    return '1';
+  }
+
+  private toPositionNumber(value: string, fallback: number): number {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private isNoteDragData(data: unknown): data is Note {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'folder_id' in data &&
+      'visibility' in data
+    );
   }
 }

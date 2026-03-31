@@ -1,16 +1,19 @@
-import { Component, input, output, signal, HostListener, forwardRef, inject, ViewChild, ElementRef } from '@angular/core';
+import { Component, input, output, signal, HostListener, forwardRef, inject, ViewChild, ElementRef, OnDestroy } from '@angular/core';
 import { Folder, FoldersService } from '../../core/api/folders.service';
+import { Note } from '../../core/api/notes.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { DragDropModule, CdkDragDrop } from '@angular/cdk/drag-drop';
+import { DragDropModule, CdkDrag, CdkDragDrop, CdkDragEnter } from '@angular/cdk/drag-drop';
 import { IconFolderComponent } from '../icons/icon-folder';
 import { IconChevronRightComponent } from '../icons/icon-chevron-right';
 import { IconChevronDownComponent } from '../icons/icon-chevron-down';
 import { IconPlusComponent } from '../icons/icon-plus';
 import { IconContentComponent } from '../icons/icon-content';
 import { NotesListComponent } from '../notes-list/notes-list';
+import { ViewerAccessService } from '../../core/access/viewer-access.service';
 
 const DEFAULT_FOLDER_NAME = 'New folder';
+const AUTO_EXPAND_DELAY_MS = 400;
 
 @Component({
   selector: 'app-folder-tree-item',
@@ -30,7 +33,8 @@ const DEFAULT_FOLDER_NAME = 'New folder';
   templateUrl: './folder-tree-item.html',
   styleUrl: './folder-tree-item.scss',
 })
-export class FolderTreeItemComponent {
+export class FolderTreeItemComponent implements OnDestroy {
+  protected readonly access = inject(ViewerAccessService);
   folder = input.required<Folder>();
   allFolders = input.required<Folder[]>();
   /** When set, the folder with this id (space root) shows "Content" if title is empty. */
@@ -73,6 +77,7 @@ export class FolderTreeItemComponent {
   inlineCreateName = '';
   /** Rename mode: value in the input. */
   renameTitle = '';
+  private autoExpandTimeout: ReturnType<typeof setTimeout> | null = null;
 
   hasChildren(): boolean {
     return this.getChildren(this.folder().id).length > 0;
@@ -101,6 +106,7 @@ export class FolderTreeItemComponent {
   }
 
   toggleCreateDropdown(event: Event): void {
+    if (!this.access.canEdit()) return;
     event.stopPropagation();
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
     const rect = btn?.getBoundingClientRect();
@@ -122,26 +128,54 @@ export class FolderTreeItemComponent {
   }
 
   onCreateSubfolder(): void {
+    if (!this.access.canEdit()) return;
     this.createSubfolder.emit(this.folder().id);
     this.createDropdownOpen.set(false);
     this.createDropdownPosition.set(null);
   }
 
   onCreateNote(): void {
+    if (!this.access.canEdit()) return;
     this.createNoteInFolder.emit(this.folder().id);
     this.createDropdownOpen.set(false);
     this.createDropdownPosition.set(null);
   }
 
   onDrop(event: CdkDragDrop<{ parentId: number }, Folder>): void {
+    if (!this.access.canDrag()) return;
+    this.clearAutoExpandTimeout();
     const folder = event.item.data;
     const data = event.container.data;
-    if (!folder || !data) return;
+    if (!this.isFolderDragData(folder) || !data) return;
     this.folderDrop.emit({ folderId: folder.id, newParentId: data.parentId });
   }
 
+  onDragEntered(event: CdkDragEnter<{ parentId: number }, unknown>): void {
+    if (!this.access.canDrag() || this.expanded()) return;
+    if (!this.isNoteDragData(event.item.data)) return;
+    this.clearAutoExpandTimeout();
+    this.autoExpandTimeout = setTimeout(() => {
+      this.autoExpandTimeout = null;
+      if (this.expanded()) return;
+      this.expanded.set(true);
+      this.folderExpandedChange.emit({
+        folderId: this.folder().id,
+        expanded: true,
+      });
+    }, AUTO_EXPAND_DELAY_MS);
+  }
+
+  onDragExited(): void {
+    this.clearAutoExpandTimeout();
+  }
+
+  canReceiveFolderItemDrag = (_drag: CdkDrag<unknown>): boolean => {
+    return this.access.canDrag();
+  };
+
   /** + clicked: start inline create under this folder. */
   onPlusClick(event: Event): void {
+    if (!this.access.canEdit()) return;
     event.stopPropagation();
     this.startCreating.emit(this.folder().id);
   }
@@ -157,6 +191,7 @@ export class FolderTreeItemComponent {
   }
 
   submitInlineCreate(): void {
+    if (!this.access.canEdit()) return;
     const name = (this.inlineCreateName || DEFAULT_FOLDER_NAME).trim();
     this.foldersService.create(this.folder().id, name).subscribe({
       next: (created) => {
@@ -173,16 +208,19 @@ export class FolderTreeItemComponent {
   }
 
   onInlineCreateFolder(): void {
+    if (!this.access.canEdit()) return;
     this.createFolderWithDefault.emit(this.folder().id);
     this.cancelCreating.emit();
   }
 
   onInlineCreatePage(): void {
+    if (!this.access.canEdit()) return;
     this.createNoteInFolder.emit(this.folder().id);
     this.cancelCreating.emit();
   }
 
   submitRename(): void {
+    if (!this.access.canEdit()) return;
     const newName = (this.renameTitle || this.getFolderTitle()).trim();
     if (newName && newName !== this.folder().title) {
       this.foldersService.update(this.folder().id, { title: newName }).subscribe({
@@ -208,5 +246,34 @@ export class FolderTreeItemComponent {
   cancelRename(): void {
     this.renameTitle = this.folder().title;
     this.folderRenamed.emit({ folderId: this.folder().id, newName: this.folder().title });
+  }
+
+  ngOnDestroy(): void {
+    this.clearAutoExpandTimeout();
+  }
+
+  private clearAutoExpandTimeout(): void {
+    if (this.autoExpandTimeout != null) {
+      clearTimeout(this.autoExpandTimeout);
+      this.autoExpandTimeout = null;
+    }
+  }
+
+  private isFolderDragData(data: unknown): data is Folder {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'parent_id' in data &&
+      'path' in data
+    );
+  }
+
+  private isNoteDragData(data: unknown): data is Note {
+    return (
+      typeof data === 'object' &&
+      data !== null &&
+      'folder_id' in data &&
+      'visibility' in data
+    );
   }
 }

@@ -4,6 +4,7 @@
  */
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
+import { config } from '../config';
 import { pool } from './index';
 
 const MIGRATIONS_DIR = join(__dirname, '../../migrations');
@@ -25,7 +26,7 @@ async function appliedMigrations(): Promise<Set<string>> {
 }
 
 async function run(): Promise<void> {
-  if (!process.env.DATABASE_URL) {
+  if (!config.databaseUrl.trim()) {
     console.error('DATABASE_URL is not set');
     process.exit(1);
   }
@@ -34,6 +35,14 @@ async function run(): Promise<void> {
   const files = (await readdir(MIGRATIONS_DIR))
     .filter((f) => f.endsWith('.sql'))
     .sort();
+  const pending = files.filter((file) => !applied.has(file.replace(/\.sql$/, '')));
+
+  if (!pending.length) {
+    console.log('No pending migrations.');
+    await pool.end();
+    return;
+  }
+
   for (const file of files) {
     const name = file.replace(/\.sql$/, '');
     if (applied.has(name)) {

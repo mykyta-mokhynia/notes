@@ -1,11 +1,12 @@
 import { Component, output, input, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CommonModule } from '@angular/common';
+import { IconSpaceAvatarComponent, SPACE_AVATAR_OPTIONS } from '../../icons/icon-space-avatar';
 
 @Component({
   selector: 'app-edit-space-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, IconSpaceAvatarComponent],
   template: `
     <div class="modal-backdrop" (click)="close()"></div>
     <div class="modal-box" role="dialog" aria-label="Edit space">
@@ -21,6 +22,22 @@ import { CommonModule } from '@angular/common';
           placeholder="Space name"
           autofocus
         />
+        <div class="avatar-picker">
+          <p class="avatar-picker-label">Avatar</p>
+          <div class="avatar-grid">
+            @for (option of avatarOptions; track option.key) {
+              <button
+                type="button"
+                class="avatar-btn"
+                [class.avatar-btn--active]="avatarKey === option.key"
+                (click)="avatarKey = option.key"
+                [attr.aria-label]="'Avatar ' + option.key"
+              >
+                <app-icon-space-avatar [avatarKey]="option.key" [size]="18"></app-icon-space-avatar>
+              </button>
+            }
+          </div>
+        </div>
         @if (error(); as err) {
           <p class="modal-error">{{ err }}</p>
         }
@@ -76,6 +93,40 @@ import { CommonModule } from '@angular/common';
         font-size: 0.8125rem;
         color: var(--error-color, #c62828);
       }
+      .avatar-picker {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .avatar-picker-label {
+        margin: 0;
+        font-size: 0.8125rem;
+        font-weight: 500;
+      }
+      .avatar-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 0.35rem;
+      }
+      .avatar-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 2rem;
+        border: 1px solid var(--border-color, #e0e0e0);
+        border-radius: 6px;
+        background: var(--bg-color, #fff);
+        cursor: pointer;
+        color: var(--text-color, #111);
+      }
+      .avatar-btn:hover {
+        background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+      }
+      .avatar-btn--active {
+        border-color: var(--focus-color, #1976d2);
+        background: rgba(25, 118, 210, 0.12);
+      }
       .modal-actions {
         display: flex;
         gap: 0.5rem;
@@ -106,14 +157,18 @@ import { CommonModule } from '@angular/common';
 })
 export class EditSpaceModalComponent implements OnInit {
   initialName = input<string>('');
+  initialAvatarKey = input<number>(1);
   name = '';
+  avatarKey = 1;
+  avatarOptions = SPACE_AVATAR_OPTIONS;
   error = input<string | null>(null);
 
-  update = output<string>();
+  update = output<{ name: string; avatarKey: number }>();
   closed = output<void>();
 
   ngOnInit(): void {
     this.name = this.initialName() ?? '';
+    this.avatarKey = this.initialAvatarKey() ?? 1;
   }
 
   close(): void {
@@ -123,6 +178,6 @@ export class EditSpaceModalComponent implements OnInit {
   submit(): void {
     const n = this.name.trim();
     if (!n) return;
-    this.update.emit(n);
+    this.update.emit({ name: n, avatarKey: this.avatarKey });
   }
 }

@@ -1,12 +1,14 @@
 <div class="sidebar-spaces">
   <div class="spaces-header">
     <button type="button" class="spaces-header-btn" (click)="toggleSection()">
-      <span class="spaces-title-icon"><app-icon-planet-ring></app-icon-planet-ring></span>
-      <span class="spaces-title">Spaces</span>
+      <span class="spaces-title-icon"><app-icon-docs></app-icon-docs></span>
+      <span class="spaces-title">Docs</span>
     </button>
+    @if (access.canEdit()) {
     <button type="button" class="spaces-add-btn" (click)="openCreateSpaceModal(); $event.stopPropagation()" title="New space">
       <app-icon-plus></app-icon-plus>
     </button>
+    }
     <button type="button" class="spaces-chevron-btn" (click)="toggleSection()" [attr.aria-expanded]="sectionExpanded()">
       @if (sectionExpanded()) {
         <app-icon-chevron-down></app-icon-chevron-down>
@@ -27,6 +29,9 @@
               [class.expanded]="expandedSpaceId() === space.id"
               (click)="toggleSpace(space)"
             >
+              <span class="space-avatar">
+                <app-icon-space-avatar [avatarKey]="space.avatar_key ?? 1"></app-icon-space-avatar>
+              </span>
               <span class="space-name">{{ space.name }}</span>
               @if (expandedSpaceId() === space.id) {
                 <app-icon-chevron-down></app-icon-chevron-down>
@@ -34,6 +39,7 @@
                 <app-icon-chevron-right></app-icon-chevron-right>
               }
             </button>
+            @if (access.canEdit()) {
             <div class="space-menu-wrap">
               <button
                 type="button"
@@ -45,6 +51,7 @@
                 <app-icon-ellipsis></app-icon-ellipsis>
               </button>
             </div>
+            }
           </div>
 
           @if (expandedSpaceId() === space.id) {
@@ -65,6 +72,7 @@
                   </span>
                   <span class="section-row-label">Content</span>
                 </button>
+                @if (access.canEdit()) {
                 <div class="content-create-wrap">
                   <button
                     type="button"
@@ -75,9 +83,10 @@
                     <app-icon-plus></app-icon-plus>
                   </button>
                 </div>
+                }
               </div>
               @if (contentExpanded()) {
-                <div class="space-tree-notes">
+                <div class="space-tree-notes" cdkDropListGroup>
                   <app-folder-tree
                     [rootFolderId]="space.root_folder_id"
                     [selectedFolderId]="getActiveFolderId(space)"
@@ -111,7 +120,7 @@
     </div>
   }
 
-  @if (contentCreateOpenSpaceId() !== null) {
+  @if (access.canEdit() && contentCreateOpenSpaceId() !== null) {
     @if (contentCreatePosition(); as pos) {
       <div
         class="content-create-dropdown content-create-dropdown--fixed"
@@ -131,7 +140,7 @@
     }
   }
 
-  @if (spaceForMenu(); as space) {
+  @if (access.canEdit() && spaceForMenu(); as space) {
     @if (spaceMenuPosition(); as pos) {
       <div
         class="space-context-menu space-context-menu--fixed"
@@ -178,6 +187,7 @@
   @if (showEditSpaceModal(); as space) {
     <app-edit-space-modal
       [initialName]="space.name"
+      [initialAvatarKey]="space.avatar_key ?? 1"
       [error]="editSpaceError()"
       (update)="onUpdateSpaceName($event)"
       (closed)="closeEditSpaceModal()"

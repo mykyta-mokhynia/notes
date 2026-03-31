@@ -147,7 +147,7 @@
   min-height: 2rem;
   padding: 0.2rem 0.35rem;
   margin: 0.1rem 0;
-  padding-left: var(--tree-indent, 10px);
+  padding-left: var(--tree-indent, 12px);
 }
 
 .inline-create-input {
@@ -207,7 +207,7 @@
 .children {
   position: relative;
   margin-left: 0;
-  padding-left: var(--tree-indent, 8px);
+  padding-left: var(--tree-indent, 12px);
 }
 
 .children::before {

@@ -114,6 +114,9 @@
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   min-width: 220px;
+  max-width: min(280px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 
 .note-context-menu--fixed {

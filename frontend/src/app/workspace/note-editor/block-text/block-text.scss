@@ -20,6 +20,10 @@
   border-color: var(--focus-color, #666);
 }
 
+::ng-deep .block-text-editor--readonly {
+  background: var(--bg-muted, #fafafa);
+}
+
 ::ng-deep .block-text-editor p {
   margin: 0 0 0.5em 0;
 }

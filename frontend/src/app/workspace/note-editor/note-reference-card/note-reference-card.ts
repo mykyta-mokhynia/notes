@@ -15,6 +15,7 @@ export class NoteReferenceCardComponent implements OnInit {
   @Input() targetNoteId = '';
   @Input() display: 'card' | 'inline' = 'card';
   @Input() blockData: Record<string, unknown> = {};
+  @Input() editable = true;
   contentChange = output<Record<string, unknown>>();
 
   targetNote = null as Note | null;
@@ -37,6 +38,7 @@ export class NoteReferenceCardComponent implements OnInit {
   }
 
   setTarget(): void {
+    if (!this.editable) return;
     const id = this.editId.trim();
     if (!id) return;
     this.contentChange.emit({ ...this.blockData, target_note_id: id });

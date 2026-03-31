@@ -3,6 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import express, { Request, Response } from 'express';
 import { config } from './config';
+import { optionalAuth } from './auth/middleware';
+import authRouter from './routes/auth';
+import adminRouter from './routes/admin';
 import foldersRouter from './routes/folders';
 import notesRouter from './routes/notes';
 import searchRouter from './routes/search';
@@ -22,6 +25,9 @@ app.get('/api/health', (_req: Request, res: Response) => {
   });
 });
 
+app.use(optionalAuth);
+app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
 app.use('/api/folders', foldersRouter);
 app.use('/api/notes', notesRouter);
 app.use('/api/search', searchRouter);

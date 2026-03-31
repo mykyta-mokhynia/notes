@@ -3,7 +3,7 @@ import * as foldersDb from './folders';
 import * as notesDb from './notes';
 import type { Space, SpaceRow, NoteVisibility } from '../types';
 
-const COLS = 'id, name, root_folder_id, about_note_id, visibility';
+const COLS = 'id, name, root_folder_id, about_note_id, visibility, avatar_key';
 
 function rowToSpace(r: SpaceRow): Space {
   return {
@@ -12,12 +12,14 @@ function rowToSpace(r: SpaceRow): Space {
     root_folder_id: r.root_folder_id,
     about_note_id: r.about_note_id,
     visibility: r.visibility === 'PUBLIC' ? 'PUBLIC' : 'PRIVATE',
+    avatar_key: Number(r.avatar_key) || 1,
   };
 }
 
-export async function listSpaces(): Promise<Space[]> {
+export async function listSpaces(includePrivate = true): Promise<Space[]> {
+  const visibility = includePrivate ? '' : `WHERE visibility = 'PUBLIC'`;
   const { rows } = await query<SpaceRow>(
-    `SELECT ${COLS} FROM spaces ORDER BY id`
+    `SELECT ${COLS} FROM spaces ${visibility} ORDER BY id`
   );
   return rows.map(rowToSpace);
 }
@@ -27,13 +29,17 @@ export interface SpaceWithNoteCount extends Space {
 }
 
 /** List spaces with note count per space (notes in root folder and all descendants). */
-export async function listSpacesWithNoteCount(): Promise<SpaceWithNoteCount[]> {
+export async function listSpacesWithNoteCount(
+  includePrivate = true
+): Promise<SpaceWithNoteCount[]> {
+  const noteVisibility = includePrivate ? '' : `AND n.visibility = 'PUBLIC'`;
+  const spaceVisibility = includePrivate ? '' : `WHERE s.visibility = 'PUBLIC'`;
   const { rows } = await query<SpaceRow & { note_count: number }>(
-    `SELECT s.id, s.name, s.root_folder_id, s.about_note_id, s.visibility,
+    `SELECT s.id, s.name, s.root_folder_id, s.about_note_id, s.visibility, s.avatar_key,
             (SELECT count(*)::int FROM notes n
              INNER JOIN folders f ON n.folder_id = f.id
-             WHERE f.path IS NOT NULL AND f.path <@ (SELECT path FROM folders WHERE id = s.root_folder_id)::ltree) AS note_count
-     FROM spaces s ORDER BY s.id`
+             WHERE f.path IS NOT NULL AND f.path <@ (SELECT path FROM folders WHERE id = s.root_folder_id)::ltree ${noteVisibility}) AS note_count
+     FROM spaces s ${spaceVisibility} ORDER BY s.id`
   );
   return rows.map((r) => ({
     ...rowToSpace(r),
@@ -41,9 +47,13 @@ export async function listSpacesWithNoteCount(): Promise<SpaceWithNoteCount[]> {
   }));
 }
 
-export async function getSpaceById(id: number): Promise<Space | null> {
+export async function getSpaceById(
+  id: number,
+  includePrivate = true
+): Promise<Space | null> {
+  const visibility = includePrivate ? '' : `AND visibility = 'PUBLIC'`;
   const { rows } = await query<SpaceRow>(
-    `SELECT ${COLS} FROM spaces WHERE id = $1`,
+    `SELECT ${COLS} FROM spaces WHERE id = $1 ${visibility}`,
     [id]
   );
   return rows[0] ? rowToSpace(rows[0]) : null;
@@ -59,27 +69,30 @@ export async function getSpaceIdByAboutNoteId(noteId: string): Promise<number | 
 }
 
 /** Create space: root folder (internal), one About note, space row. Content stays empty. */
-export async function createSpace(name: string): Promise<Space> {
+export async function createSpace(name: string, avatarKey = 1): Promise<Space> {
   const trimmedName = name.trim();
   const folder = await foldersDb.createFolder(null, '', '1');
   const aboutNote = await notesDb.createNote(
     folder.id,
     `About space ${trimmedName}`,
     'PUBLIC',
-    '1'
+    '1',
+    null
   );
   const { rows } = await query<SpaceRow>(
-    `INSERT INTO spaces (name, root_folder_id, about_note_id) VALUES ($1, $2, $3) RETURNING ${COLS}`,
-    [trimmedName, folder.id, aboutNote.id]
+    `INSERT INTO spaces (name, root_folder_id, about_note_id, avatar_key) VALUES ($1, $2, $3, $4) RETURNING ${COLS}`,
+    [trimmedName, folder.id, aboutNote.id, avatarKey]
   );
   return rowToSpace(rows[0]);
 }
 
 export async function updateSpace(
   id: number,
-  data: { name?: string; visibility?: NoteVisibility }
+  data: { name?: string; visibility?: NoteVisibility; avatar_key?: number }
 ): Promise<Space | null> {
-  if (data.name === undefined && data.visibility === undefined) return getSpaceById(id);
+  if (data.name === undefined && data.visibility === undefined && data.avatar_key === undefined) {
+    return getSpaceById(id);
+  }
   const updates: string[] = [];
   const values: unknown[] = [];
   let i = 1;
@@ -90,6 +103,10 @@ export async function updateSpace(
   if (data.visibility === 'PUBLIC' || data.visibility === 'PRIVATE') {
     updates.push(`visibility = $${i++}`);
     values.push(data.visibility);
+  }
+  if (typeof data.avatar_key === 'number') {
+    updates.push(`avatar_key = $${i++}`);
+    values.push(data.avatar_key);
   }
   values.push(id);
   const { rows } = await query<SpaceRow>(

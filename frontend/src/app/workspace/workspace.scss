@@ -1,6 +1,16 @@
-.workspace {
+:host {
   display: flex;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace {
+  --workspace-sidebar-offset: calc(280px + 2rem + 1px);
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -9,9 +19,10 @@
   position: relative;
   z-index: 10;
   width: var(--sidebar-width);
+  min-height: 0;
   border-right: 1px solid var(--border-color, #e0e0e0);
   padding: var(--sidebar-padding);
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .sidebar > * {
@@ -85,6 +96,21 @@
 }
 
 .main {
+  display: flex;
+  flex-direction: column;
   flex: 1;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
+  overflow-x: hidden;
+}
+
+.main > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.main > router-outlet + * {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }

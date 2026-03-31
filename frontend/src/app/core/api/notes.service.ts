@@ -11,6 +11,10 @@ export interface Note {
   title: string;
   position: string;
   visibility: NoteVisibility;
+  created_by_user_id: number | null;
+  creator_nickname: string | null;
+  creator_avatar_initials: string | null;
+  creator_avatar_color: string | null;
   created_at: string;
   updated_at: string;
   search_dirty?: boolean;
@@ -25,6 +29,20 @@ export interface NoteBlock {
   position: string;
   version: number;
   data: Record<string, unknown>;
+}
+
+export interface NoteComment {
+  id: string;
+  note_id: string;
+  author_id: number;
+  author_type: 'USER' | 'GUEST';
+  author_role: 'ADMIN' | 'USER' | 'GUEST';
+  nickname: string;
+  avatar_initials: string;
+  avatar_color: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
 
 const BASE = `${environment.apiUrl}/api/notes`;
@@ -76,6 +94,18 @@ export class NotesService {
 
   listBlocks(noteId: string): Observable<NoteBlock[]> {
     return this.http.get<NoteBlock[]>(`${BASE}/${noteId}/blocks`);
+  }
+
+  listComments(noteId: string): Observable<NoteComment[]> {
+    return this.http.get<NoteComment[]>(`${BASE}/${noteId}/comments`);
+  }
+
+  createComment(noteId: string, content: string): Observable<NoteComment> {
+    return this.http.post<NoteComment>(`${BASE}/${noteId}/comments`, { content });
+  }
+
+  deleteComment(noteId: string, commentId: string): Observable<void> {
+    return this.http.delete<void>(`${BASE}/${noteId}/comments/${commentId}`);
   }
 
   createBlock(

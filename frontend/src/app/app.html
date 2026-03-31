@@ -1,10 +1,143 @@
-<nav class="nav">
+<nav
+  class="nav"
+  [class.nav--compact]="isCenteredAuthPage()"
+  [class.nav--blocked]="isModalAuthPage()"
+>
   <a routerLink="/" class="brand">Notes</a>
-  <app-search-bar></app-search-bar>
+  @if (!isCenteredAuthPage()) {
+    <app-search-bar></app-search-bar>
+  }
   <div class="links">
-    <a routerLink="/home" routerLinkActive="active">Home</a>
+    @if (isModalAuthPage()) {
+      <span class="viewer-avatar-link viewer-avatar-link--static" aria-hidden="true">
+        <span class="viewer-avatar viewer-avatar--icon">
+          <svg viewBox="0 0 640 640" focusable="false">
+            <path d="M463 448.2C440.9 409.8 399.4 384 352 384L288 384C240.6 384 199.1 409.8 177 448.2C212.2 487.4 263.2 512 320 512C376.8 512 427.8 487.3 463 448.2zM64 320C64 178.6 178.6 64 320 64C461.4 64 576 178.6 576 320C576 461.4 461.4 576 320 576C178.6 576 64 461.4 64 320zM320 336C359.8 336 392 303.8 392 264C392 224.2 359.8 192 320 192C280.2 192 248 224.2 248 264C248 303.8 280.2 336 320 336z"/>
+          </svg>
+        </span>
+      </span>
+    }
+    @if (auth.isAuthenticated() && !isModalAuthPage()) {
+      <button
+        type="button"
+        class="viewer-avatar-link"
+        aria-label="Open profile menu"
+        aria-haspopup="dialog"
+        [attr.aria-expanded]="profileMenuOpen()"
+        (click)="toggleProfileMenu()"
+      >
+        <span
+          class="viewer-avatar"
+          [attr.style]="viewerAvatarStyle()"
+          [attr.aria-label]="viewerLabel()"
+        >
+          {{ viewerInitials() }}
+        </span>
+      </button>
+    }
   </div>
 </nav>
-<main>
+@if (isModalAuthPage()) {
+  <div class="auth-screen-backdrop" aria-hidden="true"></div>
+}
+@if (profileMenuOpen()) {
+  <button
+    type="button"
+    class="profile-menu-backdrop"
+    aria-label="Close profile menu"
+    (click)="closeProfileMenu()"
+  ></button>
+  <section class="profile-menu" role="dialog" aria-label="Profile menu">
+    <header class="profile-menu-header">
+      <span
+        class="profile-menu-header__avatar"
+        [attr.style]="viewerAvatarStyle()"
+        [attr.aria-label]="viewerLabel()"
+      >
+        {{ viewerInitials() }}
+      </span>
+      <div class="profile-menu-header__text">
+        <div class="profile-menu-header__name">{{ viewerLabel() }}</div>
+        <div class="profile-menu-header__email">{{ viewerEmail() }}</div>
+      </div>
+    </header>
+    @if (!auth.isGuest()) {
+      <button type="button" class="profile-menu-item" (click)="openAccount()">
+        <span class="profile-menu-item__icon" aria-hidden="true">
+          <svg viewBox="0 0 640 640" focusable="false">
+            <path d="M535.6 85.7C513.7 63.8 478.3 63.8 456.4 85.7L432 110.1L529.9 208L554.3 183.6C576.2 161.7 576.2 126.3 554.3 104.4L535.6 85.7zM236.4 305.7C230.3 311.8 225.6 319.3 222.9 327.6L193.3 416.4C190.4 425 192.7 434.5 199.1 441C205.5 447.5 215 449.7 223.7 446.8L312.5 417.2C320.7 414.5 328.2 409.8 334.4 403.7L496 241.9L398.1 144L236.4 305.7zM160 128C107 128 64 171 64 224L64 480C64 533 107 576 160 576L416 576C469 576 512 533 512 480L512 384C512 366.3 497.7 352 480 352C462.3 352 448 366.3 448 384L448 480C448 497.7 433.7 512 416 512L160 512C142.3 512 128 497.7 128 480L128 224C128 206.3 142.3 192 160 192L256 192C273.7 192 288 177.7 288 160C288 142.3 273.7 128 256 128L160 128z"/>
+          </svg>
+        </span>
+        <span class="profile-menu-item__label">Edit profile</span>
+      </button>
+    }
+    <div class="profile-menu-submenu">
+      <button type="button" class="profile-menu-item profile-menu-item--submenu" (click)="openThemeModal()">
+        <span class="profile-menu-item__icon profile-menu-item__icon--default" aria-hidden="true">
+          <svg viewBox="0 0 640 640" focusable="false">
+            <path d="M512 320C512 214 426 128 320 128L320 512C426 512 512 426 512 320zM64 320C64 178.6 178.6 64 320 64C461.4 64 576 178.6 576 320C576 461.4 461.4 576 320 576C178.6 576 64 461.4 64 320z"/>
+          </svg>
+        </span>
+        <span class="profile-menu-item__icon profile-menu-item__icon--hover" aria-hidden="true">
+          <svg viewBox="0 0 640 640" focusable="false">
+            <path d="M201.4 297.4C188.9 309.9 188.9 330.2 201.4 342.7L361.4 502.7C373.9 515.2 394.2 515.2 406.7 502.7C419.2 490.2 419.2 469.9 406.7 457.4L269.3 320L406.6 182.6C419.1 170.1 419.1 149.8 406.6 137.3C394.1 124.8 373.8 124.8 361.3 137.3L201.3 297.3z"/>
+          </svg>
+        </span>
+        <span class="profile-menu-item__label">Switch theme</span>
+      </button>
+      @if (themeModalOpen()) {
+        <section class="theme-modal theme-modal--popover" role="dialog" aria-label="Theme selection">
+          <div class="theme-modal__actions">
+            <button
+              type="button"
+              class="theme-option"
+              [class.theme-option--active]="isThemeSelected('light')"
+              (click)="setTheme('light')"
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              class="theme-option"
+              [class.theme-option--active]="isThemeSelected('dark')"
+              (click)="setTheme('dark')"
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              class="theme-option"
+              [class.theme-option--active]="isThemeSelected('system')"
+              (click)="setTheme('system')"
+            >
+              Match browser
+            </button>
+          </div>
+        </section>
+      }
+    </div>
+    <div class="profile-menu-divider" aria-hidden="true"></div>
+    <button type="button" class="profile-menu-item" (click)="openProfileSwitcher()">
+      <span class="profile-menu-item__icon" aria-hidden="true">
+        <svg viewBox="0 0 640 640" focusable="false">
+          <path d="M560 224C560 277 517 320 464 320C411 320 368 277 368 224C368 171 411 128 464 128C517 128 560 171 560 224zM385.5 391.3C408 376.6 435 368 464 368C543.5 368 608 432.5 608 512L608 534.4C608 557.4 589.4 576 566.4 576L421.6 576C428.2 563.5 432 549.2 432 534L432 528C432 476.5 414.6 429.1 385.5 391.3zM208 304C269.9 304 320 253.9 320 192C320 130.1 269.9 80 208 80C146.1 80 96 130.1 96 192C96 253.9 146.1 304 208 304zM208 352C110.8 352 32 430.8 32 528L32 534C32 557.2 50.8 576 74 576L342 576C365.2 576 384 557.2 384 534L384 528C384 430.8 305.2 352 208 352z"/>
+        </svg>
+      </span>
+      <span class="profile-menu-item__label">Switch profile</span>
+    </button>
+    <button type="button" class="profile-menu-item profile-menu-item--danger" (click)="logout()">
+      <span class="profile-menu-item__icon" aria-hidden="true">
+        <svg viewBox="0 0 640 640" focusable="false">
+          <path d="M408 496C394.7 496 384 506.7 384 520C384 533.3 394.7 544 408 544L480 544C533 544 576 501 576 448L576 192C576 139 533 96 480 96L408 96C394.7 96 384 106.7 384 120C384 133.3 394.7 144 408 144L480 144C506.5 144 528 165.5 528 192L528 448C528 474.5 506.5 496 480 496L408 496zM71 303C61.6 312.4 61.6 327.6 71 336.9L207 473C216.4 482.4 231.6 482.4 240.9 473C250.2 463.6 250.3 448.4 240.9 439.1L145.9 344.1L392 344.1C405.3 344.1 416 333.4 416 320.1C416 306.8 405.3 296.1 392 296.1L145.9 296.1L240.9 201.1C250.3 191.7 250.3 176.5 240.9 167.2C231.5 157.9 216.3 157.8 207 167.2L71 303z"/>
+        </svg>
+      </span>
+      <span class="profile-menu-item__label">Logout</span>
+    </button>
+  </section>
+}
+<main
+  [class.main--centered]="isCenteredAuthPage()"
+  [class.main--modal]="isModalAuthPage()"
+>
   <router-outlet />
 </main>

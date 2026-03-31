@@ -9,6 +9,7 @@ import { NoteBlock } from '../../../core/api/notes.service';
 })
 export class BlockCodeComponent {
   block = input.required<NoteBlock>();
+  editable = input<boolean>(true);
   contentChange = output<Record<string, unknown>>();
 
   get rawCode(): string {
@@ -18,6 +19,7 @@ export class BlockCodeComponent {
   }
 
   onInput(e: Event): void {
+    if (!this.editable()) return;
     const value = (e.target as HTMLTextAreaElement).value;
     this.contentChange.emit({ ...this.block().data, raw_code: value });
   }

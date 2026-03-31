@@ -185,6 +185,22 @@
 
 ---
 
+## Auth и operational setup
+
+- Backend auth уже включает: local sign up / sign in, guest login, refresh-token sessions, onboarding, password reset, базовый account management, Google sign-in / link, admin seed script.
+- **Password reset:** в `development` без SMTP backend возвращает preview reset link; в production обязателен реальный SMTP-конфиг через `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, а также корректный `APP_BASE_URL`.
+- **Google auth:** для рабочего запуска нужен один и тот же `GOOGLE_CLIENT_ID` и на backend, и в frontend environment; frontend button должен рендериться только когда обе стороны реально сконфигурированы.
+- **DB rollout:** auth/comments/admin сценарии требуют реального прогона миграций `008`, `009`, `010`; admin создаётся отдельно через `npm run seed:admin --prefix backend`.
+
+### Auth rollout commands
+
+1. Подготовить backend env: `DATABASE_URL`, при необходимости `GOOGLE_CLIENT_ID`, SMTP-настройки и `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NICKNAME`.
+2. Применить миграции: `npm run migrate --prefix backend`.
+3. Создать или обновить admin account: `npm run seed:admin --prefix backend`.
+4. Если backend падает с ошибками вроде `column "role" does not exist`, это признак того, что auth-миграции ещё не были применены к текущей БД.
+
+---
+
 ## План
 
 ### Фаза 1 — Основа и хранилище

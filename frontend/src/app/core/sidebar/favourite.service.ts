@@ -2,6 +2,8 @@ import { Injectable } from '@angular/core';
 import { Subject } from 'rxjs';
 
 const STORAGE_KEY = 'notes_favourites';
+export const MAX_FAVOURITES_TOTAL = 10;
+export type FavouriteToggleResult = 'added' | 'removed' | 'limit_reached';
 
 export interface Favourites {
   folderIds: number[];
@@ -16,6 +18,18 @@ export class FavouriteService {
   private data: Favourites = this.load();
   /** Emit after toggle to refresh sidebar list. */
   readonly refresh$ = new Subject<void>();
+
+  private getTotalCount(): number {
+    return (
+      this.data.folderIds.length +
+      this.data.noteIds.length +
+      this.data.spaceIds.length
+    );
+  }
+
+  private canAddNewFavourite(): boolean {
+    return this.getTotalCount() < MAX_FAVOURITES_TOTAL;
+  }
 
   private load(): Favourites {
     try {
@@ -75,27 +89,54 @@ export class FavouriteService {
     return this.data.spaceIds.includes(spaceId);
   }
 
-  toggleFolder(folderId: number): void {
+  toggleFolder(folderId: number): FavouriteToggleResult {
     const i = this.data.folderIds.indexOf(folderId);
-    if (i >= 0) this.data.folderIds.splice(i, 1);
-    else this.data.folderIds.push(folderId);
+    if (i >= 0) {
+      this.data.folderIds.splice(i, 1);
+      this.save();
+      this.refresh$.next();
+      return 'removed';
+    }
+    else {
+      if (!this.canAddNewFavourite()) return 'limit_reached';
+      this.data.folderIds.push(folderId);
+    }
     this.save();
     this.refresh$.next();
+    return 'added';
   }
 
-  toggleNote(noteId: string): void {
+  toggleNote(noteId: string): FavouriteToggleResult {
     const i = this.data.noteIds.indexOf(noteId);
-    if (i >= 0) this.data.noteIds.splice(i, 1);
-    else this.data.noteIds.push(noteId);
+    if (i >= 0) {
+      this.data.noteIds.splice(i, 1);
+      this.save();
+      this.refresh$.next();
+      return 'removed';
+    }
+    else {
+      if (!this.canAddNewFavourite()) return 'limit_reached';
+      this.data.noteIds.push(noteId);
+    }
     this.save();
     this.refresh$.next();
+    return 'added';
   }
 
-  toggleSpace(spaceId: number): void {
+  toggleSpace(spaceId: number): FavouriteToggleResult {
     const i = this.data.spaceIds.indexOf(spaceId);
-    if (i >= 0) this.data.spaceIds.splice(i, 1);
-    else this.data.spaceIds.push(spaceId);
+    if (i >= 0) {
+      this.data.spaceIds.splice(i, 1);
+      this.save();
+      this.refresh$.next();
+      return 'removed';
+    }
+    else {
+      if (!this.canAddNewFavourite()) return 'limit_reached';
+      this.data.spaceIds.push(spaceId);
+    }
     this.save();
     this.refresh$.next();
+    return 'added';
   }
 }

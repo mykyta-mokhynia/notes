@@ -3,6 +3,7 @@
   <textarea
     class="block-code-textarea"
     [value]="rawCode"
+    [readOnly]="!editable()"
     (input)="onInput($event)"
     placeholder="Code…"
     rows="6"

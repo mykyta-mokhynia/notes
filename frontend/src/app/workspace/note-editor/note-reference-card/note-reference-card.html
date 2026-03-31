@@ -1,7 +1,7 @@
 @if (!targetNoteId) {
   <div class="ref-set">
-    <input type="text" [(ngModel)]="editId" placeholder="Note ID" class="ref-input" />
-    <button type="button" (click)="setTarget()">Set</button>
+    <input type="text" [(ngModel)]="editId" placeholder="Note ID" class="ref-input" [readOnly]="!editable" />
+    <button type="button" (click)="setTarget()" [disabled]="!editable">Set</button>
   </div>
 } @else if (loading) {
   <span class="ref-loading">…</span>

@@ -1,34 +1,27 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NotesService, Note, NoteBlock } from '../../core/api/notes.service';
 import { RecentService } from '../../core/sidebar/recent.service';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { CommonModule } from '@angular/common';
-import { BlockTextComponent } from './block-text/block-text';
-import { BlockCodeComponent } from './block-code/block-code';
-import { NoteReferenceCardComponent } from './note-reference-card/note-reference-card';
 import { Subscription } from 'rxjs';
+import { ViewerAccessService } from '../../core/access/viewer-access.service';
+import { UnifiedNoteEditorComponent } from './unified-note-editor';
 
 @Component({
   selector: 'app-note-editor',
   standalone: true,
-  imports: [CommonModule, BlockTextComponent, BlockCodeComponent, NoteReferenceCardComponent],
+  imports: [CommonModule, UnifiedNoteEditorComponent],
   templateUrl: './note-editor.html',
   styleUrl: './note-editor.scss',
 })
 export class NoteEditorComponent implements OnInit, OnDestroy {
+  protected readonly access = inject(ViewerAccessService);
   note = signal<Note | null>(null);
   blocks = signal<NoteBlock[]>([]);
   loading = signal(true);
   error = signal<string | null>(null);
   private sub?: Subscription;
-
-  sortedBlocks = computed(() => {
-    const list = this.blocks();
-    return [...list].sort(
-      (a, b) => parseFloat(a.position) - parseFloat(b.position)
-    );
-  });
 
   constructor(
     private route: ActivatedRoute,
@@ -116,79 +109,6 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  onBlockContentChange(block: NoteBlock, data: Record<string, unknown>): void {
-    this.notesService
-      .updateBlock(block.note_id, block.id, { data })
-      .subscribe({
-        next: (updated: NoteBlock) => {
-          this.blocks.update((list) =>
-            list.map((b) => (b.id === updated.id ? updated : b))
-          );
-        },
-      });
-  }
-
-  getNoteLinkTarget(block: NoteBlock): string {
-    const v = block.data?.['target_note_id'];
-    return typeof v === 'string' ? v : '';
-  }
-
-  getNoteLinkDisplay(block: NoteBlock): 'card' | 'inline' {
-    const v = block.data?.['display'];
-    return v === 'inline' ? 'inline' : 'card';
-  }
-
-  moveBlockUp(block: NoteBlock): void {
-    const list = this.sortedBlocks();
-    const idx = list.findIndex((b) => b.id === block.id);
-    if (idx <= 0) return;
-    const prev = list[idx - 1];
-    const newPos = (parseFloat(prev.position) + parseFloat(block.position)) / 2;
-    this.notesService.updateBlock(block.note_id, block.id, { position: String(newPos) }).subscribe({
-      next: (updated) => {
-        this.blocks.update((list) => list.map((b) => (b.id === updated.id ? updated : b)));
-      },
-    });
-  }
-
-  moveBlockDown(block: NoteBlock): void {
-    const list = this.sortedBlocks();
-    const idx = list.findIndex((b) => b.id === block.id);
-    if (idx < 0 || idx >= list.length - 1) return;
-    const next = list[idx + 1];
-    const newPos = (parseFloat(block.position) + parseFloat(next.position)) / 2;
-    this.notesService.updateBlock(block.note_id, block.id, { position: String(newPos) }).subscribe({
-      next: (updated) => {
-        this.blocks.update((list) => list.map((b) => (b.id === updated.id ? updated : b)));
-      },
-    });
-  }
-
-  rebalanceBlocks(): void {
-    const n = this.note();
-    if (!n) return;
-    this.notesService.rebalanceBlocks(n.id).subscribe({
-      next: () => this.loadBlocks(n.id),
-    });
-  }
-
-  addBlock(type: string, data: Record<string, unknown> = {}): void {
-    const n = this.note();
-    if (!n) return;
-    const list = this.blocks();
-    const maxPos =
-      list.length === 0
-        ? 1
-        : Math.max(...list.map((b) => parseFloat(b.position))) + 1;
-    this.notesService
-      .createBlock(n.id, type, String(maxPos), data)
-      .subscribe({
-        next: (created: NoteBlock) => {
-          this.blocks.update((list) => [...list, created]);
-        },
-      });
-  }
-
   deleteNote(): void {
     const n = this.note();
     if (!n || n.is_about_note) return;
@@ -202,4 +122,37 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
       error: (err) => alert(err?.error?.error ?? 'Failed to delete note'),
     });
   }
+
+  hasPublicCreator(): boolean {
+    const current = this.note();
+    return current?.visibility === 'PUBLIC' && !!current.creator_nickname;
+  }
+
+  creatorLabel(): string {
+    const current = this.note();
+    return current?.creator_nickname?.trim() || 'Unknown';
+  }
+
+  creatorInitials(): string {
+    const current = this.note();
+    const initials = current?.creator_avatar_initials?.trim();
+    if (initials) return initials;
+    return this.creatorLabel().slice(0, 2).toUpperCase();
+  }
+
+  creatorColor(): string {
+    return this.note()?.creator_avatar_color || '#8f9ab3';
+  }
+
+  handleBodyUpdatedAt(updatedAt: string): void {
+    this.note.update((current) =>
+      current
+        ? {
+            ...current,
+            updated_at: updatedAt,
+          }
+        : current
+    );
+  }
+
 }

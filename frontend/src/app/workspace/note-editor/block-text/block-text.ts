@@ -1,5 +1,6 @@
 import {
   Component,
+  effect,
   input,
   output,
   ViewChild,
@@ -31,11 +32,24 @@ export class BlockTextComponent implements AfterViewInit, OnDestroy {
   @ViewChild('editorHost', { static: true }) editorHost!: ElementRef<HTMLDivElement>;
 
   block = input.required<NoteBlock>();
+  editable = input<boolean>(true);
   contentChange = output<Record<string, unknown>>();
 
   private editor: Editor | null = null;
   private emitTimeout: ReturnType<typeof setTimeout> | null = null;
   private readonly DEBOUNCE_MS = 400;
+
+  constructor() {
+    effect(() => {
+      const editable = this.editable();
+      const editor = this.editor;
+      if (!editor) return;
+      editor.setEditable(editable);
+      (editor.view.dom as HTMLElement).className = `block-text-editor${
+        editable ? '' : ' block-text-editor--readonly'
+      }`;
+    });
+  }
 
   ngAfterViewInit(): void {
     const el = this.editorHost?.nativeElement;
@@ -50,9 +64,12 @@ export class BlockTextComponent implements AfterViewInit, OnDestroy {
     this.editor = new Editor({
       element: el,
       extensions: [StarterKit],
+      editable: this.editable(),
       content: content as Record<string, unknown>,
       editorProps: {
-        attributes: { class: 'block-text-editor' },
+        attributes: {
+          class: `block-text-editor${this.editable() ? '' : ' block-text-editor--readonly'}`,
+        },
       },
       onUpdate: ({ editor }) => this.emitDoc(editor.getJSON()),
     });

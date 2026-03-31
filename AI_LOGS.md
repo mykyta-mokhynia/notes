@@ -1,1 +1,5 @@
-- **2026-03-03** — Add branch line from Content row. **Files:** `frontend/src/app/workspace/sidebar/sidebar-spaces.scss`. **Reason:** Requested visual continuity so hierarchy line starts from `Content` and flows into tree/notes block. **Change:** Added a vertical guide pseudo-element on `.space-tree-notes` (`::before`) and enabled relative positioning on the container to anchor the line from the top of content children area downward. **Structural impact:** none.
+- **2026-03-31**
+  - **Type of change:** Moved `note-header` into `editor-surface` and made `editor-surface` the only note content scroll container.
+  - **Files affected:** `frontend/src/app/workspace/note-editor/note-editor.html`, `frontend/src/app/workspace/note-editor/note-editor.scss`, `frontend/src/app/workspace/note-editor/unified-note-editor.ts`, `frontend/src/app/workspace/workspace.scss`, `AI_LOGS.md`.
+  - **Reason:** User requested header/content scroll to live under top controls and to remove scrolling from `.main`; follow-ups fixed `display: contents` wrappers, added explicit flex/min-height chain from `.main` down to `editor-surface`, forced routed host (`router-outlet + *`) to stretch, pinned `editor-surface` scrolling with `height: 0; flex: 1; overflow-y: auto`, and removed bottom container spacing so the scroll track reaches page bottom.
+  - **Structural impact:** None.

@@ -8,7 +8,7 @@ import { NotesService, Note } from '../../core/api/notes.service';
 import { SpacesService, Space } from '../../core/api/spaces.service';
 import { SidebarSectionComponent } from './sidebar-section';
 import { IconStarFullComponent } from '../icons/icon-star-full';
-import { IconPlanetRingComponent } from '../icons/icon-planet-ring';
+import { IconSpaceAvatarComponent } from '../icons/icon-space-avatar';
 import { IconFolderComponent } from '../icons/icon-folder';
 import { IconContentComponent } from '../icons/icon-content';
 
@@ -20,7 +20,7 @@ import { IconContentComponent } from '../icons/icon-content';
     RouterLink,
     SidebarSectionComponent,
     IconStarFullComponent,
-    IconPlanetRingComponent,
+    IconSpaceAvatarComponent,
     IconFolderComponent,
     IconContentComponent,
   ],
@@ -53,7 +53,7 @@ import { IconContentComponent } from '../icons/icon-content';
                 @for (s of spaces(); track s.id) {
                   <li>
                     <a [routerLink]="['/home']" [queryParams]="{ space: s.id }" class="sidebar-link sidebar-link--with-meta" (click)="expanded.set(false)">
-                      <span class="sidebar-link-icon"><app-icon-planet-ring></app-icon-planet-ring></span>
+                      <span class="sidebar-link-icon"><app-icon-space-avatar [avatarKey]="s.avatar_key ?? 1"></app-icon-space-avatar></span>
                       <span class="sidebar-link-text">
                         <span class="sidebar-link-title">{{ s.name }}</span>
                         @if (s.note_count !== undefined) {
@@ -173,6 +173,7 @@ import { IconContentComponent } from '../icons/icon-content';
       }
       .sidebar-list li {
         margin: 0;
+        min-width: 0;
       }
       .sidebar-link {
         display: flex;
@@ -204,7 +205,9 @@ import { IconContentComponent } from '../icons/icon-content';
         color: inherit;
       }
       .sidebar-link-text {
+        flex: 1;
         min-width: 0;
+        overflow: hidden;
       }
       .sidebar-link-title {
         overflow: hidden;
@@ -220,6 +223,9 @@ import { IconContentComponent } from '../icons/icon-content';
       .sidebar-link-meta {
         font-size: 0.7rem;
         color: var(--text-muted, #666);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     `,
   ],

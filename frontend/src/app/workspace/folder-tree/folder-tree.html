@@ -3,11 +3,13 @@
 } @else if (error) {
   <p class="error">{{ error }}</p>
 } @else {
-  <div class="tree" cdkDropListGroup>
+  <div class="tree">
     <div
       cdkDropList
       id="folder-root"
       [cdkDropListData]="{ parentId: null }"
+      [cdkDropListDisabled]="!access.canDrag()"
+      [cdkDropListEnterPredicate]="canReceiveRootFolderDrag"
       (cdkDropListDropped)="onRootDrop($event)"
     >
       @for (f of getTopLevelFolders(); track f.id) {
@@ -33,7 +35,7 @@
           (createFolderWithDefault)="onCreateFolderWithDefault($event)"
         ></app-folder-tree-item>
       }
-      @if (showInlineCreateAtRoot()) {
+      @if (access.canEdit() && showInlineCreateAtRoot()) {
         <div class="inline-create-row inline-create-row--buttons">
           <button type="button" class="inline-create-btn" (click)="onInlineCreateFolderAtRoot()">
             <span class="inline-create-btn-icon"><app-icon-folder></app-icon-folder></span>
@@ -45,7 +47,7 @@
       }
     </div>
   </div>
-  @if (showCreateButton()) {
+  @if (access.canEdit() && showCreateButton()) {
     <button type="button" class="btn-add" (click)="createFolder(null)">
       + New folder
     </button>

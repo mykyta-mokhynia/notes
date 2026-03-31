@@ -13,16 +13,35 @@ function rowToFolder(r: FolderRow): Folder {
   };
 }
 
-export async function listFoldersTree(): Promise<Folder[]> {
+function publicFolderVisibilityWhere(alias = 'folders'): string {
+  return `EXISTS (
+    SELECT 1
+    FROM spaces s
+    INNER JOIN folders root ON root.id = s.root_folder_id
+    WHERE s.visibility = 'PUBLIC'
+      AND ${alias}.path IS NOT NULL
+      AND root.path IS NOT NULL
+      AND ${alias}.path <@ root.path
+  )`;
+}
+
+export async function listFoldersTree(
+  includePrivate = true
+): Promise<Folder[]> {
+  const where = includePrivate ? '' : `WHERE ${publicFolderVisibilityWhere('folders')}`;
   const { rows } = await query<FolderRow>(
-    `SELECT ${FOLDER_COLS} FROM folders ORDER BY path`
+    `SELECT ${FOLDER_COLS} FROM folders ${where} ORDER BY path`
   );
   return rows.map(rowToFolder);
 }
 
-export async function getFolderById(id: number): Promise<Folder | null> {
+export async function getFolderById(
+  id: number,
+  includePrivate = true
+): Promise<Folder | null> {
+  const visibility = includePrivate ? '' : `AND ${publicFolderVisibilityWhere('folders')}`;
   const { rows } = await query<FolderRow>(
-    `SELECT ${FOLDER_COLS} FROM folders WHERE id = $1`,
+    `SELECT ${FOLDER_COLS} FROM folders WHERE id = $1 ${visibility}`,
     [id]
   );
   return rows[0] ? rowToFolder(rows[0]) : null;

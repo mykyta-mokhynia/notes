@@ -1,31 +1,11 @@
 import { Component, signal, OnInit, computed } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CommonModule } from '@angular/common';
-import { RecentService, RecentItem } from '../../core/sidebar/recent.service';
+import { RecentService, RecentItem, SIDEBAR_RECENT_ITEMS } from '../../core/sidebar/recent.service';
+import { groupRecentByDate } from '../../core/sidebar/recent-grouping';
 import { SidebarSectionComponent } from './sidebar-section';
 import { IconRecentComponent } from '../icons/icon-recent';
 import { IconContentComponent } from '../icons/icon-content';
-
-function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: RecentItem[]; lastMonth: RecentItem[] } {
-  const now = Date.now();
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const todayMs = startOfToday.getTime();
-  const lastWeekMs = todayMs - 7 * 24 * 60 * 60 * 1000;
-  const lastMonthMs = todayMs - 30 * 24 * 60 * 60 * 1000;
-
-  const today: RecentItem[] = [];
-  const lastWeek: RecentItem[] = [];
-  const lastMonth: RecentItem[] = [];
-
-  for (const item of items) {
-    if (item.openedAt >= todayMs) today.push(item);
-    else if (item.openedAt >= lastWeekMs) lastWeek.push(item);
-    else if (item.openedAt >= lastMonthMs) lastMonth.push(item);
-  }
-
-  return { today, lastWeek, lastMonth };
-}
 
 @Component({
   selector: 'app-sidebar-recent',
@@ -40,7 +20,7 @@ function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: Rece
     >
       <span sidebarSectionIcon><app-icon-recent></app-icon-recent></span>
       <div class="sidebar-section-body" sidebarSectionContent>
-        @if (items().length === 0) {
+        @if (sidebarItems().length === 0) {
           <p class="sidebar-empty">You don't have anything in recent.</p>
         } @else {
           <div class="recent-header">
@@ -106,6 +86,11 @@ function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: Rece
               </ul>
             </div>
           }
+          @if (sidebarItems().length > 0) {
+            <a [routerLink]="['/home', 'recent']" class="see-more-link" (click)="expanded.set(false)">
+              See more recent
+            </a>
+          }
         }
       </div>
     </app-sidebar-section>
@@ -169,17 +154,20 @@ function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: Rece
       }
       .sidebar-list li {
         margin: 0;
+        min-width: 0;
       }
       .sidebar-link {
         display: flex;
         align-items: center;
         gap: 0.5rem;
         min-height: 2rem;
+        width: 100%;
         padding: 0.25rem 0;
         font-size: 0.8125rem;
         color: inherit;
         text-decoration: none;
         overflow: hidden;
+        box-sizing: border-box;
       }
       .sidebar-link:hover {
         color: var(--focus-color, #1976d2);
@@ -201,7 +189,9 @@ function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: Rece
         display: flex;
         flex-direction: column;
         gap: 0.1rem;
+        flex: 1;
         min-width: 0;
+        overflow: hidden;
       }
       .sidebar-link-title {
         overflow: hidden;
@@ -211,20 +201,39 @@ function groupByDate(items: RecentItem[]): { today: RecentItem[]; lastWeek: Rece
       .sidebar-link-date {
         font-size: 0.7rem;
         color: var(--text-muted, #666);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .see-more-link {
+        display: inline-flex;
+        align-items: center;
+        margin-top: 0.25rem;
+        font-size: 0.8125rem;
+        color: var(--focus-color, #1976d2);
+        text-decoration: none;
+      }
+      .see-more-link:hover {
+        text-decoration: underline;
       }
     `,
   ],
 })
 export class SidebarRecentComponent implements OnInit {
   expanded = signal(false);
-  items = signal<RecentItem[]>([]);
-  grouped = computed(() => groupByDate(this.items()));
+  sidebarItems = signal<RecentItem[]>([]);
+  grouped = computed(() => groupRecentByDate(this.sidebarItems()));
 
   constructor(private recentService: RecentService) {
-    this.recentService.refresh$.subscribe(() => this.items.set(this.recentService.getItems()));
+    this.recentService.refresh$.subscribe(() => this.loadRecent());
   }
 
   ngOnInit(): void {
-    this.items.set(this.recentService.getItems());
+    this.loadRecent();
+  }
+
+  private loadRecent(): void {
+    const allItems = this.recentService.getItems();
+    this.sidebarItems.set(allItems.slice(0, SIDEBAR_RECENT_ITEMS));
   }
 }

@@ -2,6 +2,10 @@ import { Component, input, output, signal, HostListener, ElementRef, inject } fr
 import { CommonModule } from '@angular/common';
 import { IconChevronRightComponent } from '../icons/icon-chevron-right';
 
+const PANEL_WIDTH_PX = 280;
+const PANEL_MAX_HEIGHT_PX = 400;
+const VIEWPORT_MARGIN_PX = 8;
+
 @Component({
   selector: 'app-sidebar-section',
   standalone: true,
@@ -139,9 +143,10 @@ import { IconChevronRightComponent } from '../icons/icon-chevron-right';
         box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.12);
         border-radius: 8px;
         animation: sidebar-section-panel-in 0.2s ease;
+        overflow: hidden;
       }
       .sidebar-section-panel--popover {
-        width: 280px;
+        width: min(280px, calc(100vw - 16px));
         max-height: min(70vh, 400px);
         min-height: 80px;
       }
@@ -150,7 +155,10 @@ import { IconChevronRightComponent } from '../icons/icon-chevron-right';
       }
       .sidebar-section-panel-inner {
         height: 100%;
+        max-height: 100%;
+        box-sizing: border-box;
         overflow-y: auto;
+        overflow-x: hidden;
         padding: 1rem;
       }
       .sidebar-section-panel-fallback {
@@ -194,9 +202,32 @@ export class SidebarSectionComponent {
 
   onHeaderClick(event: Event): void {
     if (this.panelMode()) {
-      const el = (event.currentTarget as HTMLElement).getBoundingClientRect();
-      this.panelTop.set(el.top);
-      this.panelLeft.set(el.right);
+      const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+
+      const maxLeft = Math.max(
+        VIEWPORT_MARGIN_PX,
+        viewportWidth - PANEL_WIDTH_PX - VIEWPORT_MARGIN_PX
+      );
+      const preferredRight = triggerRect.right;
+      const preferredLeft = triggerRect.left - PANEL_WIDTH_PX;
+      const safeLeft =
+        preferredRight <= maxLeft
+          ? preferredRight
+          : Math.max(VIEWPORT_MARGIN_PX, Math.min(preferredLeft, maxLeft));
+
+      const maxTop = Math.max(
+        VIEWPORT_MARGIN_PX,
+        viewportHeight - PANEL_MAX_HEIGHT_PX - VIEWPORT_MARGIN_PX
+      );
+      const safeTop = Math.min(
+        Math.max(triggerRect.top, VIEWPORT_MARGIN_PX),
+        maxTop
+      );
+
+      this.panelTop.set(safeTop);
+      this.panelLeft.set(safeLeft);
     }
     this.expandedChange.emit(!this.expanded());
   }
