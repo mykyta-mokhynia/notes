@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { canReadPrivate, requireAdmin } from '../auth/middleware';
 import * as spacesDb from '../db/spaces';
+import type { AuthenticatedUser } from '../types';
 
 const router = Router();
+type AuthRequest = Request & { auth?: AuthenticatedUser };
 
 router.get('/', async (req: Request, res: Response) => {
   const list = await spacesDb.listSpacesWithNoteCount(canReadPrivate(req));
@@ -24,6 +26,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/', requireAdmin, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
   const { name, avatar_key } = req.body;
   if (!name || typeof name !== 'string' || !name.trim()) {
     res.status(400).json({ error: 'NAME_REQUIRED' });
@@ -35,7 +38,7 @@ router.post('/', requireAdmin, async (req: Request, res: Response) => {
     return;
   }
   try {
-    const space = await spacesDb.createSpace(name.trim(), avatarKey);
+    const space = await spacesDb.createSpace(name.trim(), avatarKey, authReq.auth?.id ?? null);
     res.status(201).json(space);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Create space failed';

@@ -9,12 +9,26 @@
       [blocks]="blocks()"
       [canEdit]="access.canEdit()"
       (deleteRequested)="deleteNote()"
+      (editingChange)="handleEditingChange($event)"
+      (updateRequested)="saveHeaderOnUpdate()"
       (updatedAtChange)="handleBodyUpdatedAt($event)"
     >
       <header class="note-header" note-header-slot>
         <div class="note-heading-row">
           <div class="note-heading-content">
-            <h1 class="note-title">{{ note()!.title }}</h1>
+            @if (access.canEdit() && isEditorEditing()) {
+              <input
+                class="note-title-input"
+                [value]="titleDraft()"
+                [disabled]="titleSaving()"
+                (input)="updateTitleDraft($any($event.target).value)"
+                (keydown)="handleTitleInputKeydown($event)"
+                placeholder="Note title"
+                aria-label="Note title"
+              />
+            } @else {
+              <h1 class="note-title">{{ note()!.title }}</h1>
+            }
             <div class="note-meta">
               @if (hasPublicCreator()) {
                 <span
@@ -26,9 +40,32 @@
                 </span>
                 <span class="note-author">by {{ creatorLabel() }}</span>
               }
-              <span class="note-visibility-badge" [class.note-visibility-badge--public]="note()!.visibility === 'PUBLIC'" [class.note-visibility-badge--private]="note()!.visibility === 'PRIVATE'">
-                {{ note()!.visibility === 'PUBLIC' ? 'Public' : 'Private' }}
-              </span>
+              @if (access.canEdit() && isEditorEditing()) {
+                <span class="note-visibility-toggle" role="group" aria-label="Note visibility">
+                  <button
+                    type="button"
+                    class="note-visibility-option note-visibility-option--public"
+                    [class.note-visibility-option--active]="visibilityDraft() === 'PUBLIC'"
+                    [disabled]="titleSaving()"
+                    (click)="setVisibilityDraft('PUBLIC')"
+                  >
+                    Public
+                  </button>
+                  <button
+                    type="button"
+                    class="note-visibility-option note-visibility-option--private"
+                    [class.note-visibility-option--active]="visibilityDraft() === 'PRIVATE'"
+                    [disabled]="titleSaving()"
+                    (click)="setVisibilityDraft('PRIVATE')"
+                  >
+                    Private
+                  </button>
+                </span>
+              } @else {
+                <span class="note-visibility-badge" [class.note-visibility-badge--public]="note()!.visibility === 'PUBLIC'" [class.note-visibility-badge--private]="note()!.visibility === 'PRIVATE'">
+                  {{ note()!.visibility === 'PUBLIC' ? 'Public' : 'Private' }}
+                </span>
+              }
               @if (!access.canEdit()) {
                 <span class="note-meta-date">Read-only access</span>
               }

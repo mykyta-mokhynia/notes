@@ -32,11 +32,15 @@ import TableRow from '@tiptap/extension-table-row';
 import TableHeader from '@tiptap/extension-table-header';
 import TableCell from '@tiptap/extension-table-cell';
 import Placeholder from '@tiptap/extension-placeholder';
-import CodeBlock from '@tiptap/extension-code-block';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Selection } from '@tiptap/extensions/selection';
+import { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import { createLowlight, common } from 'lowlight';
 import { ActivatedRoute } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
-import { Note, NoteBlock, NotesService } from '../../core/api/notes.service';
+import { Note, NoteBlock, NotePresenceUser, NotesService } from '../../core/api/notes.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { NoteUnsavedChangesService } from './note-unsaved-changes.service';
 
@@ -78,7 +82,36 @@ const HIGHLIGHT_COLOR_TOKENS = [
   'var(--rt-hl-7)',
 ] as const;
 const CODE_LANGUAGES = ['plaintext', 'css', 'html', 'javascript', 'typescript', 'json', 'sql', 'bash'] as const;
+const CODE_LANGUAGE_ALIASES: Record<string, (typeof CODE_LANGUAGES)[number]> = {
+  text: 'plaintext',
+  plain: 'plaintext',
+  txt: 'plaintext',
+  js: 'javascript',
+  ts: 'typescript',
+  scss: 'css',
+  less: 'css',
+  shell: 'bash',
+  sh: 'bash',
+  zsh: 'bash',
+};
 const TABLE_SIZES = Array.from({ length: 10 }, (_, index) => index + 1);
+const lowlight = createLowlight(common);
+const BRACKET_DEPTH_PLUGIN_KEY = new PluginKey<DecorationSet>('codeBlockBracketDepth');
+const BRACKET_OPEN_TO_CLOSE: Record<string, string> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+};
+const BRACKET_CLOSE_TO_OPEN: Record<string, string> = {
+  ')': '(',
+  ']': '[',
+  '}': '{',
+};
+const AUTOPAIR_BRACKETS: Record<string, string> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+};
 
 interface NoteActiveUser {
   id: number;
@@ -259,6 +292,15 @@ function appendSpacer(nodes: JSONContent[]): void {
   }
 }
 
+function normalizeCodeLanguage(language: unknown): (typeof CODE_LANGUAGES)[number] {
+  const raw = typeof language === 'string' ? language.trim().toLowerCase() : '';
+  if (!raw) return 'plaintext';
+  const mapped = CODE_LANGUAGE_ALIASES[raw] ?? raw;
+  return CODE_LANGUAGES.includes(mapped as (typeof CODE_LANGUAGES)[number])
+    ? (mapped as (typeof CODE_LANGUAGES)[number])
+    : 'plaintext';
+}
+
 function buildDocumentFromBlocks(blocks: NoteBlock[]): JSONContent {
   const ordered = [...blocks].sort((a, b) => parseFloat(a.position) - parseFloat(b.position));
   const nodes: JSONContent[] = [];
@@ -282,7 +324,7 @@ function buildDocumentFromBlocks(blocks: NoteBlock[]): JSONContent {
       nodes.push({
         type: 'codeBlock',
         attrs: {
-          language: typeof data['language'] === 'string' ? data['language'] : 'plaintext',
+          language: normalizeCodeLanguage(data['language']),
         },
         content: rawCode ? [{ type: 'text', text: rawCode }] : [],
       });
@@ -388,7 +430,22 @@ const DatabaseSchemaNode = TiptapNode.create({
   },
 });
 
-const RichCodeBlock = CodeBlock.extend({
+const RichCodeBlock = CodeBlockLowlight.extend({
+  addProseMirrorPlugins() {
+    const parentPlugins = this.parent?.() ?? [];
+    const bracketDepthPlugin = new Plugin<DecorationSet>({
+      key: BRACKET_DEPTH_PLUGIN_KEY,
+      state: {
+        init: (_, state) => buildCodeDecorations(state.doc),
+        apply: (transaction, decorationSet, _oldState, newState) =>
+          transaction.docChanged ? buildCodeDecorations(newState.doc) : decorationSet,
+      },
+      props: {
+        decorations: (state) => BRACKET_DEPTH_PLUGIN_KEY.getState(state),
+      },
+    });
+    return [...parentPlugins, bracketDepthPlugin];
+  },
   addAttributes() {
     return {
       ...this.parent?.(),
@@ -405,9 +462,129 @@ const RichCodeBlock = CodeBlock.extend({
       },
     };
   },
+  addNodeView() {
+    return ({ node, editor, getPos }) => {
+      let currentNode = node;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'rich-code-block';
+
+      const header = document.createElement('div');
+      header.className = 'rich-code-block__header';
+
+      const languageControl = document.createElement('label');
+      languageControl.className = 'rich-code-block__language';
+
+      const languageLabel = document.createElement('span');
+      languageLabel.className = 'rich-code-block__language-label';
+      languageLabel.textContent = 'Code';
+      const languageName = document.createElement('span');
+      languageName.className = 'rich-code-block__language-name';
+
+      const languageSelect = document.createElement('select');
+      languageSelect.className = 'rich-code-block__language-select';
+      for (const language of CODE_LANGUAGES) {
+        const option = document.createElement('option');
+        option.value = language;
+        option.textContent = language;
+        languageSelect.append(option);
+      }
+      languageControl.append(languageLabel, languageName, languageSelect);
+
+      const copyButton = document.createElement('button');
+      copyButton.type = 'button';
+      copyButton.className = 'rich-code-block__copy';
+      copyButton.textContent = 'Copy';
+
+      const pre = document.createElement('pre');
+      pre.className = 'hljs';
+      const code = document.createElement('code');
+      pre.append(code);
+
+      const copyCodeText = async (): Promise<void> => {
+        const text = currentNode.textContent ?? '';
+        if (!text.trim()) {
+          copyButton.textContent = 'Empty';
+          window.setTimeout(() => {
+            copyButton.textContent = 'Copy';
+          }, 900);
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(text);
+          copyButton.textContent = 'Copied';
+        } catch {
+          const textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.setAttribute('readonly', 'true');
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.append(textarea);
+          textarea.select();
+          document.execCommand('copy');
+          textarea.remove();
+          copyButton.textContent = 'Copied';
+        }
+        window.setTimeout(() => {
+          copyButton.textContent = 'Copy';
+        }, 900);
+      };
+
+      const updateLanguageClass = (language: string): void => {
+        code.className = '';
+        code.classList.add(`language-${language}`);
+      };
+
+      const applyNodeState = (nextNode: typeof node): void => {
+        currentNode = nextNode;
+        const language = normalizeCodeLanguage(nextNode.attrs['language']);
+        languageSelect.value = language;
+        languageName.textContent = language;
+        updateLanguageClass(language);
+      };
+
+      const updateLanguage = (language: string): void => {
+        if (!editor.isEditable || typeof getPos !== 'function') return;
+        const position = getPos();
+        if (typeof position !== 'number') return;
+        const attrs = {
+          ...currentNode.attrs,
+          language: normalizeCodeLanguage(language),
+        };
+        const transaction = editor.state.tr.setNodeMarkup(position, undefined, attrs);
+        editor.view.dispatch(transaction);
+      };
+
+      header.addEventListener('mousedown', (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest('select, button')) {
+          return;
+        }
+        event.preventDefault();
+      });
+      languageSelect.addEventListener('change', () => {
+        updateLanguage(languageSelect.value);
+      });
+      copyButton.addEventListener('click', () => {
+        void copyCodeText();
+      });
+
+      header.append(languageControl, copyButton);
+      wrapper.append(header, pre);
+      applyNodeState(currentNode);
+
+      return {
+        dom: wrapper,
+        contentDOM: code,
+        update(updatedNode) {
+          if (updatedNode.type !== currentNode.type) return false;
+          applyNodeState(updatedNode);
+          return true;
+        },
+      };
+    };
+  },
   renderHTML({ node, HTMLAttributes }) {
-    const language =
-      typeof node.attrs['language'] === 'string' ? node.attrs['language'] : 'plaintext';
+    const language = normalizeCodeLanguage(node.attrs['language']);
     return [
       'pre',
       mergeAttributes(HTMLAttributes, { 'data-language': language }),
@@ -415,6 +592,157 @@ const RichCodeBlock = CodeBlock.extend({
     ];
   },
 });
+
+function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
+  const decorations: Decoration[] = [];
+  doc.descendants((node: ProseMirrorNode, position: number) => {
+    if (node.type.name !== 'codeBlock') return;
+    const codeText = node.textContent ?? '';
+    const language = normalizeCodeLanguage(node.attrs['language']);
+    const baseIdentifierRegex = /\b[A-Za-z_$][\w$]*(?=(?:\s*\[[^\]\n]+\])?\s*(?:(?:\?\.|\.)[A-Za-z_$][\w$]*)+)/g;
+    for (const match of codeText.matchAll(baseIdentifierRegex)) {
+      if (typeof match.index !== 'number') continue;
+      const from = position + 1 + match.index;
+      const value = match[0] ?? '';
+      if (!value) continue;
+      decorations.push(
+        Decoration.inline(from, from + value.length, {
+          class: 'code-member-base',
+        })
+      );
+    }
+    const memberPropertyRegex = /(?:\?\.|\.)([A-Za-z_$][\w$]*)/g;
+    for (const match of codeText.matchAll(memberPropertyRegex)) {
+      if (typeof match.index !== 'number') continue;
+      const dotFrom = position + 1 + match.index;
+      const accessorToken = match[0].startsWith('?.') ? '?.' : '.';
+      decorations.push(
+        Decoration.inline(dotFrom, dotFrom + accessorToken.length, {
+          class: 'code-member-dot',
+        })
+      );
+      const prop = match[1] ?? '';
+      if (!prop) continue;
+      decorations.push(
+        Decoration.inline(
+          dotFrom + accessorToken.length,
+          dotFrom + accessorToken.length + prop.length,
+          {
+          class: 'code-member-property',
+          }
+        )
+      );
+    }
+    const indexedPropertyRegex = /\.([A-Za-z_$][\w$]*)\s*\[(.+?)\]/g;
+    for (const match of codeText.matchAll(indexedPropertyRegex)) {
+      if (typeof match.index !== 'number') continue;
+      const property = match[1] ?? '';
+      const indexExpression = match[2] ?? '';
+      if (!property) continue;
+      const full = match[0] ?? '';
+      const dotAbsolute = position + 1 + match.index;
+      const propertyAbsolute = dotAbsolute + 1;
+      const openingBracketInMatch = full.indexOf('[');
+      if (openingBracketInMatch < 0) continue;
+      const openingBracketAbsolute = dotAbsolute + openingBracketInMatch;
+      const closingBracketAbsolute = openingBracketAbsolute + 1 + indexExpression.length;
+      decorations.push(
+        Decoration.inline(propertyAbsolute, propertyAbsolute + property.length, {
+          class: 'code-indexed-property',
+        })
+      );
+      decorations.push(
+        Decoration.inline(openingBracketAbsolute, openingBracketAbsolute + 1, {
+          class: 'code-index-bracket',
+        })
+      );
+      decorations.push(
+        Decoration.inline(closingBracketAbsolute, closingBracketAbsolute + 1, {
+          class: 'code-index-bracket',
+        })
+      );
+      if (indexExpression.length) {
+        decorations.push(
+          Decoration.inline(openingBracketAbsolute + 1, openingBracketAbsolute + 1 + indexExpression.length, {
+            class: 'code-index-expression',
+          })
+        );
+      }
+    }
+    const declarationKeywordRegex = /\b(let|const)\b/g;
+    for (const match of codeText.matchAll(declarationKeywordRegex)) {
+      if (typeof match.index !== 'number') continue;
+      const keyword = match[1];
+      if (!keyword) continue;
+      const from = position + 1 + match.index;
+      decorations.push(
+        Decoration.inline(from, from + keyword.length, {
+          class: keyword === 'const' ? 'code-keyword-const' : 'code-keyword-let',
+        })
+      );
+    }
+    const declarationVariableRegex = /\b(?:let|const|var)\s+([A-Za-z_$][\w$]*)/g;
+    for (const match of codeText.matchAll(declarationVariableRegex)) {
+      if (typeof match.index !== 'number') continue;
+      const variableName = match[1];
+      if (!variableName) continue;
+      const variableOffsetInMatch = match[0].lastIndexOf(variableName);
+      if (variableOffsetInMatch < 0) continue;
+      const from = position + 1 + match.index + variableOffsetInMatch;
+      decorations.push(
+        Decoration.inline(from, from + variableName.length, {
+          class: 'code-declaration-variable',
+        })
+      );
+    }
+    if (language === 'css') {
+      const cssValueWordRegex = /:\s*([A-Za-z-]+)/g;
+      for (const match of codeText.matchAll(cssValueWordRegex)) {
+        if (typeof match.index !== 'number') continue;
+        const valueWord = match[1];
+        if (!valueWord) continue;
+        const valueOffsetInMatch = match[0].lastIndexOf(valueWord);
+        if (valueOffsetInMatch < 0) continue;
+        const from = position + 1 + match.index + valueOffsetInMatch;
+        decorations.push(
+          Decoration.inline(from, from + valueWord.length, {
+            class: 'code-css-value-word',
+          })
+        );
+      }
+    }
+    const stack: Array<{ bracket: string; depth: 1 | 2 | 3 }> = [];
+    node.descendants((child: ProseMirrorNode, childPos: number) => {
+      if (!child.isText || typeof child.text !== 'string') return;
+      const text = child.text;
+      for (let index = 0; index < text.length; index += 1) {
+        const char = text[index];
+        const from = position + 1 + childPos + index;
+        if (BRACKET_OPEN_TO_CLOSE[char]) {
+          const depth = ((stack.length % 3) + 1) as 1 | 2 | 3;
+          stack.push({ bracket: char, depth });
+          decorations.push(
+            Decoration.inline(from, from + 1, {
+              class: `code-bracket-depth-${depth}`,
+            })
+          );
+          continue;
+        }
+        const expectedOpen = BRACKET_CLOSE_TO_OPEN[char];
+        if (!expectedOpen || !stack.length) continue;
+        const last = stack[stack.length - 1];
+        if (last.bracket !== expectedOpen) continue;
+        stack.pop();
+        decorations.push(
+          Decoration.inline(from, from + 1, {
+            class: `code-bracket-depth-${last.depth}`,
+          })
+        );
+      }
+    });
+  });
+  return DecorationSet.create(doc, decorations);
+}
 
 @Component({
   selector: 'app-unified-note-editor',
@@ -477,7 +805,13 @@ const RichCodeBlock = CodeBlock.extend({
                           <span class="note-active-users-popover__name">{{ user.label }}</span>
                           <span class="note-active-users-popover__meta">{{ user.email || 'No email' }}</span>
                         </div>
-                        <span class="note-active-users-popover__status">{{ user.activity }}</span>
+                        <span
+                          class="note-active-users-popover__status"
+                          [class.note-active-users-popover__status--editing]="user.activity === 'Editing'"
+                          [class.note-active-users-popover__status--viewing]="user.activity === 'Viewing'"
+                        >
+                          {{ user.activity }}
+                        </span>
                       </div>
                     }
                   </div>
@@ -523,15 +857,14 @@ const RichCodeBlock = CodeBlock.extend({
           </div>
         </div>
 
+        @if (toolbarVisible()) {
         <section
           class="editor-toolbar"
-          [class.editor-toolbar--hidden]="!toolbarVisible()"
           role="toolbar"
           aria-label="Note formatting toolbar"
           (pointerdown)="preserveToolbarSelection($event)"
           (mousedown)="preserveToolbarSelection($event)"
         >
-          @if (toolbarVisible()) {
           <div class="editor-toolbar__group">
             <div class="toolbar-anchor">
               <button
@@ -903,6 +1236,7 @@ const RichCodeBlock = CodeBlock.extend({
                 <div class="toolbar-popover toolbar-popover--menu">
                   <button type="button" class="toolbar-menu-item" (click)="insertDatabaseSchema()">Database schema</button>
                   <div class="toolbar-menu-heading">Code block</div>
+                  <div class="toolbar-menu-heading toolbar-menu-heading--hint">Tip: /code or /code ts</div>
                   @for (language of codeLanguages; track language) {
                     <button type="button" class="toolbar-menu-item" (click)="insertCodeBlock(language)">
                       {{ language }}
@@ -978,11 +1312,11 @@ const RichCodeBlock = CodeBlock.extend({
               </button>
             }
           </div>
-          }
         </section>
+        }
       </div>
 
-      <section class="editor-surface" [class.editor-surface--editing]="editorEnabled()">
+      <section class="editor-surface" #editorSurface [class.editor-surface--editing]="editorEnabled()">
         <ng-content select="[note-header-slot]"></ng-content>
         <div #editorHost class="editor-host"></div>
       </section>
@@ -1152,7 +1486,7 @@ const RichCodeBlock = CodeBlock.extend({
         position: relative;
         width: 1.75rem;
         height: 1.75rem;
-        margin-left: -0.3rem;
+        margin-left: -0.78rem;
       }
 
       .note-active-users__avatar:first-child {
@@ -1176,7 +1510,6 @@ const RichCodeBlock = CodeBlock.extend({
         line-height: 1.2;
         text-transform: none;
         white-space: nowrap;
-        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
         transition: opacity 120ms ease, transform 120ms ease;
         z-index: 12;
       }
@@ -1193,7 +1526,7 @@ const RichCodeBlock = CodeBlock.extend({
         min-width: 1.75rem;
         height: 1.75rem;
         padding: 0 0.38rem;
-        margin-left: 0.25rem;
+        margin-left: 0.12rem;
         border-radius: 999px;
         background: var(--hover-bg, #eef1f6);
         color: var(--text-muted, #666);
@@ -1211,8 +1544,9 @@ const RichCodeBlock = CodeBlock.extend({
         padding: 0.45rem;
         border: 1px solid var(--border-color, #d8dde6);
         border-radius: 0.55rem;
-        background: var(--bg, #fff);
-        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.14);
+        background: var(--dropdown-bg, var(--bg-color, #fff));
+        color: var(--text-color, #111);
+        box-shadow: 0 10px 22px rgba(2, 6, 23, 0.16);
       }
 
       .note-active-users-popover__list {
@@ -1268,6 +1602,29 @@ const RichCodeBlock = CodeBlock.extend({
         font-size: 0.76rem;
       }
 
+      .note-active-users-popover__status {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 4.6rem;
+        padding: 0.22rem 0.45rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        font-weight: 600;
+      }
+
+      .note-active-users-popover__status--editing {
+        background: var(--presence-editing-bg, rgba(34, 197, 94, 0.14));
+        color: var(--presence-editing-text, #166534);
+        border-color: var(--presence-editing-border, rgba(34, 197, 94, 0.28));
+      }
+
+      .note-active-users-popover__status--viewing {
+        background: var(--presence-viewing-bg, rgba(59, 130, 246, 0.12));
+        color: var(--presence-viewing-text, #1e40af);
+        border-color: var(--presence-viewing-border, rgba(59, 130, 246, 0.26));
+      }
+
       .note-updated--warning {
         color: #b45309;
       }
@@ -1308,12 +1665,15 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       this.requestMountEditor(this.editorDoc, this.restoreDraftOnMount);
     }
   }
+  @ViewChild('editorSurface') private editorSurface?: ElementRef<HTMLElement>;
 
   readonly note = input.required<Note>();
   readonly blocks = input<NoteBlock[]>([]);
   readonly canEdit = input(false);
   readonly deleteRequested = output<void>();
   readonly updatedAtChange = output<string>();
+  readonly editingChange = output<boolean>();
+  readonly updateRequested = output<void>();
 
   readonly auth = inject(AuthService);
   private readonly hostElement = inject(ElementRef<HTMLElement>);
@@ -1334,6 +1694,7 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly plusMenuOpen = signal(false);
   readonly tablePreview = signal<{ rows: number; cols: number } | null>(null);
   readonly selectionVersion = signal(0);
+  readonly presenceUsers = signal<NoteActiveUser[]>([]);
 
   readonly toolbarIcons = TOOLBAR_ICONS;
   readonly headingOptions = HEADING_OPTIONS;
@@ -1346,21 +1707,12 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly editorEnabled = computed(() => this.canEdit() && this.isEditing());
   readonly toolbarVisible = computed(() => this.editorEnabled());
   readonly activeUsers = computed<NoteActiveUser[]>(() => {
-    const user = this.auth.user();
-    if (!user) {
-      return [];
+    const users = this.presenceUsers();
+    if (users.length) {
+      return users;
     }
-    const label = user.nickname || user.email || 'Guest';
-    return [
-      {
-        id: user.id,
-        label,
-        email: user.email,
-        initials: user.avatar_initials || label.slice(0, 2).toUpperCase(),
-        avatarColor: user.avatar_color,
-        activity: this.editorEnabled() ? 'Editing' : 'Viewing',
-      },
-    ];
+    const fallback = this.buildFallbackUser();
+    return fallback ? [fallback] : [];
   });
   readonly visibleActiveUsers = computed(() => this.activeUsers().slice(0, 3));
   readonly hiddenActiveUsersCount = computed(() => Math.max(this.activeUsers().length - 3, 0));
@@ -1380,12 +1732,21 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   private mountEditorQueued = false;
   private pendingMountRequest: { doc: JSONContent; preserveDirty: boolean } | null = null;
   private readonly isMacPlatform = this.detectMacPlatform();
+  private presenceInFlight = false;
+  private modeScrollFrameId: number | null = null;
+  private lastAppliedEditorMode: boolean | null = null;
+  private draftRequestVersion = 0;
 
   constructor() {
     effect(() => {
       const editable = this.editorEnabled();
       this.editor?.setEditable(editable);
+      this.syncEditorModeClass();
       this.queueSelectionVersionUpdate();
+      if (this.lastAppliedEditorMode !== editable) {
+        this.lastAppliedEditorMode = editable;
+        this.queueModeScrollAlignment();
+      }
     });
 
     effect((onCleanup) => {
@@ -1420,29 +1781,94 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
           ? (bodyBlock.data['doc'] as JSONContent)
           : buildDocumentFromBlocks(blocks);
       this.pendingDoc = doc;
-      const localDraft = this.unsavedChanges.readDraft(note.id);
-      const shouldRestoreDraft =
-        !!localDraft &&
-        this.currentDocSignature(localDraft) !== this.currentDocSignature(doc);
-      this.editorDoc = shouldRestoreDraft ? localDraft : doc;
-      this.restoreDraftOnMount = shouldRestoreDraft;
-      this.hasUnsavedChanges.set(shouldRestoreDraft);
+      this.editorDoc = doc;
+      this.restoreDraftOnMount = false;
+      this.hasUnsavedChanges.set(false);
       this.saveError.set(null);
-      if (!shouldRestoreDraft) {
-        this.unsavedChanges.clearDraft(note.id);
-      }
-      if (shouldRestoreDraft && this.canEdit()) {
-        this.isEditing.set(true);
-      }
       if (this.editorHost) {
-        this.requestMountEditor(this.editorDoc, shouldRestoreDraft);
+        this.requestMountEditor(this.editorDoc, false);
       }
+      const requestVersion = ++this.draftRequestVersion;
+      void this.restoreDraftFromServer(note.id, doc, requestVersion);
+    });
+
+    effect((onCleanup) => {
+      const noteId = this.note().id;
+      this.presenceUsers.set([]);
+      this.syncPresence(noteId);
+      const intervalId = window.setInterval(() => {
+        this.syncPresence(noteId);
+      }, 10_000);
+      onCleanup(() => {
+        window.clearInterval(intervalId);
+      });
+    });
+
+    effect(() => {
+      const noteId = this.note().id;
+      this.editorEnabled();
+      this.syncPresence(noteId);
     });
   }
 
   ngOnDestroy(): void {
+    if (this.modeScrollFrameId !== null) {
+      window.cancelAnimationFrame(this.modeScrollFrameId);
+      this.modeScrollFrameId = null;
+    }
     this.editor?.destroy();
     this.editor = null;
+  }
+
+  private buildFallbackUser(): NoteActiveUser | null {
+    const user = this.auth.user();
+    if (!user) {
+      return null;
+    }
+    const label = user.nickname || user.email || 'Guest';
+    return {
+      id: user.id,
+      label,
+      email: user.email,
+      initials: user.avatar_initials || label.slice(0, 2).toUpperCase(),
+      avatarColor: user.avatar_color,
+      activity: this.editorEnabled() ? 'Editing' : 'Viewing',
+    };
+  }
+
+  private mapPresenceUsers(users: NotePresenceUser[]): NoteActiveUser[] {
+    return users.map((user) => ({
+      id: user.id,
+      label: user.label,
+      email: user.email,
+      initials: user.initials,
+      avatarColor: user.avatarColor,
+      activity: user.activity,
+    }));
+  }
+
+  private syncPresence(noteId: string): void {
+    if (this.presenceInFlight || noteId !== this.note().id) return;
+    this.presenceInFlight = true;
+    const currentUser = this.auth.user();
+    const request$ = currentUser
+      ? this.notesService.heartbeatPresence(noteId, this.editorEnabled() ? 'Editing' : 'Viewing')
+      : this.notesService.listPresence(noteId);
+    request$.subscribe({
+      next: (users) => {
+        if (noteId !== this.note().id) return;
+        this.presenceUsers.set(this.mapPresenceUsers(users));
+      },
+      error: () => {
+        this.presenceInFlight = false;
+        if (noteId !== this.note().id) return;
+        const fallback = this.buildFallbackUser();
+        this.presenceUsers.set(fallback ? [fallback] : []);
+      },
+      complete: () => {
+        this.presenceInFlight = false;
+      },
+    });
   }
 
   formattedUpdatedAt(): string {
@@ -1466,14 +1892,14 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   toggleEditing(): void {
     if (!this.canEdit()) return;
-    this.isEditing.set(true);
+    this.setEditingState(true);
     this.saveError.set(null);
     this.closeToolbarMenus();
   }
 
   cancelEditing(): void {
     if (!this.canEdit() || this.isSaving()) return;
-    this.isEditing.set(false);
+    this.setEditingState(false);
     this.closeToolbarMenus();
     this.hasUnsavedChanges.set(false);
     this.saveError.set(null);
@@ -1487,15 +1913,22 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   async updateEditing(): Promise<void> {
     if (!this.editorEnabled() || this.isSaving()) return;
     this.closeToolbarMenus();
+    this.updateRequested.emit();
     const saved = await this.persist(() => {
-      this.isEditing.set(false);
+      this.setEditingState(false);
       if (this.pendingDoc && this.editorHost) {
         this.requestMountEditor(this.pendingDoc);
       }
     });
     if (!saved) {
-      this.isEditing.set(true);
+      this.setEditingState(true);
     }
+  }
+
+  private setEditingState(nextValue: boolean): void {
+    if (this.isEditing() === nextValue) return;
+    this.isEditing.set(nextValue);
+    this.editingChange.emit(nextValue);
   }
 
   toggleActiveUsers(): void {
@@ -1618,7 +2051,19 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   private handleEditorShortcuts(event: KeyboardEvent): boolean {
     if (!this.editorEnabled() || event.defaultPrevented || event.isComposing) return false;
+    if (this.tryHandleBracketAutopair(event)) return true;
+    if (this.tryHandleCodeSlashCommand(event)) return true;
     const key = event.key.toLowerCase();
+    if (this.isModPressed(event) && key === 's') {
+      event.preventDefault();
+      void this.updateEditing();
+      return true;
+    }
+    if (!this.isModPressed(event) && !event.altKey && !event.shiftKey && key === 'escape') {
+      event.preventDefault();
+      this.cancelEditing();
+      return true;
+    }
 
     if (this.isModPressed(event) && event.altKey && !event.shiftKey) {
       if (key === '0') {
@@ -1718,6 +2163,57 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     }
 
     return false;
+  }
+
+  private tryHandleBracketAutopair(event: KeyboardEvent): boolean {
+    if (this.isModPressed(event) || event.altKey || event.ctrlKey || event.metaKey) {
+      return false;
+    }
+    const closing = AUTOPAIR_BRACKETS[event.key];
+    if (!closing) return false;
+    const editor = this.activeEditor();
+    if (!editor) return false;
+    const { selection } = editor.state;
+    if (!selection.empty) return false;
+    if (selection.$from.parent.type.name !== 'codeBlock') return false;
+    event.preventDefault();
+    const from = selection.from;
+    const pair = `${event.key}${closing}`;
+    const transaction = editor.state.tr.insertText(pair, from, from);
+    transaction.setSelection(TextSelection.create(transaction.doc, from + 1));
+    editor.view.dispatch(transaction);
+    return true;
+  }
+
+  private tryHandleCodeSlashCommand(event: KeyboardEvent): boolean {
+    if (event.key !== 'Enter' || this.isModPressed(event) || event.altKey || event.shiftKey) {
+      return false;
+    }
+    const editor = this.activeEditor();
+    if (!editor) return false;
+    const { selection } = editor.state;
+    if (!selection.empty) return false;
+    const parent = selection.$from.parent;
+    if (parent.type.name !== 'paragraph') return false;
+    const commandText = parent.textContent.trim();
+    const match = commandText.match(/^\/code(?:\s+([a-zA-Z0-9_+-]+))?$/);
+    if (!match) return false;
+    const language = normalizeCodeLanguage(match[1]);
+    event.preventDefault();
+    const from = selection.$from.start();
+    const to = selection.$from.end();
+    editor
+      .chain()
+      .focus()
+      .setTextSelection({ from, to })
+      .deleteSelection()
+      .setCodeBlock({ language })
+      .run();
+    const nextSelection = editor.state.selection;
+    if (!nextSelection.empty) return true;
+    const transaction = editor.state.tr.setSelection(TextSelection.near(editor.state.selection.$from));
+    editor.view.dispatch(transaction);
+    return true;
   }
 
   private requestMountEditor(doc: JSONContent, preserveDirty = false): void {
@@ -2118,12 +2614,13 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   insertCodeBlock(language: string): void {
     const editor = this.activeEditor();
     if (!editor) return;
+    const normalizedLanguage = normalizeCodeLanguage(language);
     editor
       .chain()
       .focus()
       .insertContent({
         type: 'codeBlock',
-        attrs: { language },
+        attrs: { language: normalizedLanguage },
         content: [],
       })
       .run();
@@ -2132,6 +2629,29 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   private currentDocSignature(doc: JSONContent | null | undefined): string {
     return JSON.stringify(doc ?? emptyDoc());
+  }
+
+  private async restoreDraftFromServer(
+    noteId: string,
+    persistedDoc: JSONContent,
+    requestVersion: number
+  ): Promise<void> {
+    const draft = await this.unsavedChanges.readDraft(noteId);
+    if (requestVersion !== this.draftRequestVersion) return;
+    if (this.note().id !== noteId) return;
+    const shouldRestoreDraft =
+      !!draft &&
+      this.currentDocSignature(draft) !== this.currentDocSignature(persistedDoc);
+    if (!shouldRestoreDraft || !draft) return;
+    this.editorDoc = draft;
+    this.restoreDraftOnMount = true;
+    this.hasUnsavedChanges.set(true);
+    if (this.canEdit()) {
+      this.setEditingState(true);
+    }
+    if (this.editorHost) {
+      this.requestMountEditor(draft, true);
+    }
   }
 
   private refreshUnsavedState(): void {
@@ -2182,7 +2702,13 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
           link: false,
           underline: false,
         }),
-        RichCodeBlock,
+        RichCodeBlock.configure({
+          lowlight,
+          languageClassPrefix: 'language-',
+          defaultLanguage: 'plaintext',
+          exitOnTripleEnter: false,
+          exitOnArrowDown: true,
+        }),
         Underline,
         Link.configure({
           openOnClick: false,
@@ -2241,14 +2767,93 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     });
     queueMicrotask(() => {
       this.suppressUpdates = false;
+      this.syncEditorModeClass();
       this.hasUnsavedChanges.set(preserveDirty);
       this.saveError.set(null);
       this.queueSelectionVersionUpdate();
       const q = this.route.snapshot.queryParamMap.get('q');
       if (q?.trim()) {
         setTimeout(() => this.scrollToFirstMatch(q.trim()), 100);
+      } else {
+        this.queueModeScrollAlignment();
       }
     });
+  }
+
+  private syncEditorModeClass(): void {
+    const root = this.editor?.view.dom;
+    if (!(root instanceof HTMLElement)) return;
+    root.classList.add('unified-note-editor');
+    root.classList.toggle('unified-note-editor--readonly', !this.editorEnabled());
+    root.style.paddingTop = '0';
+  }
+
+  private queueModeScrollAlignment(): void {
+    if (this.modeScrollFrameId !== null) {
+      window.cancelAnimationFrame(this.modeScrollFrameId);
+      this.modeScrollFrameId = null;
+    }
+    this.modeScrollFrameId = window.requestAnimationFrame(() => {
+      this.modeScrollFrameId = window.requestAnimationFrame(() => {
+        this.modeScrollFrameId = null;
+        this.applyModeScrollAlignment();
+      });
+    });
+  }
+
+  private applyModeScrollAlignment(): void {
+    const targets = this.collectScrollTargets();
+    if (!targets.length) return;
+    const target = targets[0].scrollTop;
+    for (const container of targets) {
+      container.scrollTop = target;
+    }
+  }
+
+  private resolveSecondLineOffset(): number {
+    const root = this.editor?.view.dom;
+    if (!(root instanceof HTMLElement)) return 24;
+    const lineHeight = Number.parseFloat(getComputedStyle(root).lineHeight);
+    return Number.isFinite(lineHeight) && lineHeight > 0 ? Math.round(lineHeight) : 24;
+  }
+
+  private collectScrollTargets(): HTMLElement[] {
+    const targets: HTMLElement[] = [];
+    const pushUnique = (element: HTMLElement | null | undefined): void => {
+      if (!element) return;
+      if (!targets.includes(element)) targets.push(element);
+    };
+
+    const surface = this.editorSurface?.nativeElement;
+    if (surface instanceof HTMLElement) {
+      pushUnique(surface);
+    }
+
+    const root = this.editor?.view.dom;
+    if (root instanceof HTMLElement) {
+      let current: HTMLElement | null = root.parentElement;
+      while (current) {
+        if (this.isScrollable(current)) {
+          pushUnique(current);
+          // First scrollable ancestor is usually the active container.
+          break;
+        }
+        current = current.parentElement;
+      }
+    }
+
+    const scrollingElement = document.scrollingElement;
+    if (scrollingElement instanceof HTMLElement) {
+      pushUnique(scrollingElement);
+    }
+    return targets;
+  }
+
+  private isScrollable(element: HTMLElement): boolean {
+    const style = getComputedStyle(element);
+    const overflowY = style.overflowY;
+    const allowsScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+    return allowsScroll && element.scrollHeight > element.clientHeight;
   }
 
   private persist(onSuccess?: () => void): Promise<boolean> {

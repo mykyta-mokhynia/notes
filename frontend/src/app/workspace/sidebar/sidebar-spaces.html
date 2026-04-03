@@ -2,7 +2,7 @@
   <div class="spaces-header">
     <button type="button" class="spaces-header-btn" (click)="toggleSection()">
       <span class="spaces-title-icon"><app-icon-docs></app-icon-docs></span>
-      <span class="spaces-title">Docs</span>
+      <span class="spaces-title">Library</span>
     </button>
     @if (access.canEdit()) {
     <button type="button" class="spaces-add-btn" (click)="openCreateSpaceModal(); $event.stopPropagation()" title="New space">
@@ -61,7 +61,7 @@
                   <span class="section-row-icon">
                     <app-icon-about></app-icon-about>
                   </span>
-                  <span class="section-row-label">About space {{ space.name }}</span>
+                  <span class="section-row-label">About {{ space.name }} Collection</span>
                 </button>
               }
               <div class="section-row-wrap">

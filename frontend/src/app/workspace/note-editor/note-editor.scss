@@ -29,6 +29,8 @@
   gap: 0.4rem;
   width: 100%;
   max-width: 780px;
+  box-sizing: border-box;
+  padding-inline: 1.35rem;
   margin-left: auto;
   margin-right: auto;
   margin-top: 2.25rem;
@@ -48,7 +50,39 @@
 .note-title {
   font-size: 1.5rem;
   font-weight: 500;
+  line-height: 1.2;
   margin: 0;
+}
+
+.note-title-input {
+  display: block;
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  font-family: inherit;
+  font-size: 1.5rem;
+  font-weight: 500;
+  line-height: 1.2;
+  height: calc(1.5rem * 1.2);
+  min-height: 0;
+  box-sizing: border-box;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+  outline: none;
+}
+
+.note-title-input:focus {
+  border: none;
+  box-shadow: none;
+}
+
+.note-title-input:disabled {
+  opacity: 0.75;
+  cursor: progress;
 }
 
 .note-creator-avatar {
@@ -105,6 +139,60 @@
   color: var(--visibility-private-color, #616161);
 }
 
+.note-visibility-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.note-visibility-option {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.14rem 0.52rem;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: transparent;
+  color: var(--text-muted, #666);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.note-visibility-option--public.note-visibility-option--active {
+  background: var(--visibility-public-bg, #e8f5e9);
+  border-color: color-mix(in srgb, var(--visibility-public-color, #2e7d32) 35%, transparent);
+  color: var(--visibility-public-color, #2e7d32);
+}
+
+.note-visibility-option--private.note-visibility-option--active {
+  background: var(--visibility-private-bg, #f5f5f5);
+  border-color: color-mix(in srgb, var(--visibility-private-color, #616161) 35%, transparent);
+  color: var(--visibility-private-color, #616161);
+}
+
+.note-visibility-option:not(:disabled):not(.note-visibility-option--active):hover {
+  background: var(--hover-bg, #f3f4f6);
+  color: var(--text-color, #111827);
+}
+
+.note-visibility-option:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+:host-context([data-theme='dark']) .note-visibility-option--public.note-visibility-option--active {
+  background: rgba(74, 222, 128, 0.3);
+  border-color: rgba(134, 239, 172, 0.5);
+  color: #dcfce7;
+}
+
+:host-context([data-theme='dark']) .note-visibility-option--private.note-visibility-option--active {
+  background: rgba(148, 163, 184, 0.28);
+  border-color: rgba(203, 213, 225, 0.42);
+  color: #e2e8f0;
+}
+
 .note-meta-date {
   color: var(--text-muted, #666);
 }
@@ -126,6 +214,7 @@
 
   .note-header {
     margin-top: 1.9rem;
+    padding-inline: 1rem;
   }
 
   .note-heading-row {

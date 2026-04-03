@@ -116,3 +116,8 @@ export async function moveNote(
   );
   return rowCount ? getNoteById(noteId) : null;
 }
+
+export async function touchNote(noteId: string): Promise<boolean> {
+  const result = await query(`UPDATE notes SET updated_at = now() WHERE id = $1`, [noteId]);
+  return (result.rowCount ?? 0) > 0;
+}

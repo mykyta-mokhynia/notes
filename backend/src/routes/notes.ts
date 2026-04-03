@@ -5,10 +5,59 @@ import * as blocksDb from '../db/blocks';
 import * as commentsDb from '../db/comments';
 import * as searchDb from '../db/search';
 import * as spacesDb from '../db/spaces';
+import * as noteDraftsDb from '../db/note-drafts';
 import type { AuthenticatedUser, NoteVisibility } from '../types';
 
 const router = Router();
 type AuthRequest = Request & { auth?: AuthenticatedUser };
+type PresenceActivity = 'Viewing' | 'Editing';
+
+interface PresenceRow {
+  noteId: string;
+  userId: number;
+  label: string;
+  email: string | null;
+  initials: string;
+  avatarColor: string | null;
+  activity: PresenceActivity;
+  updatedAt: number;
+}
+
+const NOTE_PRESENCE_TTL_MS = 45_000;
+const notePresence = new Map<string, PresenceRow>();
+
+function presenceKey(noteId: string, userId: number): string {
+  return `${noteId}:${userId}`;
+}
+
+function prunePresence(now = Date.now()): void {
+  for (const [key, row] of notePresence.entries()) {
+    if (now - row.updatedAt > NOTE_PRESENCE_TTL_MS) {
+      notePresence.delete(key);
+    }
+  }
+}
+
+function listPresence(
+  noteId: string
+): Array<Omit<PresenceRow, 'updatedAt' | 'noteId' | 'userId'> & { id: number }> {
+  prunePresence();
+  const rows = Array.from(notePresence.values()).filter((row) => row.noteId === noteId);
+  rows.sort((a, b) => {
+    if (a.activity !== b.activity) {
+      return a.activity === 'Editing' ? -1 : 1;
+    }
+    return b.updatedAt - a.updatedAt;
+  });
+  return rows.map((row) => ({
+    id: row.userId,
+    label: row.label,
+    email: row.email,
+    initials: row.initials,
+    avatarColor: row.avatarColor,
+    activity: row.activity,
+  }));
+}
 
 router.get('/', async (req: Request, res: Response) => {
   const folderId = req.query.folder_id;
@@ -54,6 +103,88 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
   const isAboutNote = (await spacesDb.getSpaceIdByAboutNoteId(note.id)) !== null;
   res.json({ ...note, is_about_note: isAboutNote });
+});
+
+router.get('/:noteId/presence', async (req: Request, res: Response) => {
+  const note = await notesDb.getNoteById(req.params.noteId, canReadPrivate(req));
+  if (!note) {
+    res.status(404).json({ error: 'NOT_FOUND' });
+    return;
+  }
+  res.json(listPresence(req.params.noteId));
+});
+
+router.post('/:noteId/presence', async (req: Request, res: Response) => {
+  const note = await notesDb.getNoteById(req.params.noteId, canReadPrivate(req));
+  if (!note) {
+    res.status(404).json({ error: 'NOT_FOUND' });
+    return;
+  }
+  const authReq = req as AuthRequest;
+  if (!authReq.auth) {
+    res.status(401).json({ error: 'AUTH_REQUIRED' });
+    return;
+  }
+  const requestedActivity = req.body?.activity;
+  const activity: PresenceActivity = requestedActivity === 'Editing' ? 'Editing' : 'Viewing';
+  const label =
+    authReq.auth.nickname?.trim() || authReq.auth.email?.trim() || `User ${authReq.auth.id}`;
+  const initials =
+    authReq.auth.avatar_initials?.trim() || label.slice(0, 2).toUpperCase();
+  notePresence.set(presenceKey(req.params.noteId, authReq.auth.id), {
+    noteId: req.params.noteId,
+    userId: authReq.auth.id,
+    label,
+    email: authReq.auth.email,
+    initials,
+    avatarColor: authReq.auth.avatar_color,
+    activity,
+    updatedAt: Date.now(),
+  });
+  res.json(listPresence(req.params.noteId));
+});
+
+router.get('/:noteId/draft', requireAuthenticated, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const note = await notesDb.getNoteById(req.params.noteId, canReadPrivate(req));
+  if (!note) {
+    res.status(404).json({ error: 'NOT_FOUND' });
+    return;
+  }
+  const draft = await noteDraftsDb.getNoteDraft(req.params.noteId, authReq.auth!.id);
+  if (!draft) {
+    res.json(null);
+    return;
+  }
+  res.json({
+    note_id: draft.note_id,
+    user_id: draft.user_id,
+    doc: draft.doc,
+    created_at: draft.created_at,
+    updated_at: draft.updated_at,
+  });
+});
+
+router.put('/:noteId/draft', requireAuthenticated, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  const note = await notesDb.getNoteById(req.params.noteId, canReadPrivate(req));
+  if (!note) {
+    res.status(404).json({ error: 'NOT_FOUND' });
+    return;
+  }
+  const doc = req.body?.doc;
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    res.status(400).json({ error: 'DOC_REQUIRED' });
+    return;
+  }
+  await noteDraftsDb.upsertNoteDraft(req.params.noteId, authReq.auth!.id, doc as Record<string, unknown>);
+  res.status(204).send();
+});
+
+router.delete('/:noteId/draft', requireAuthenticated, async (req: Request, res: Response) => {
+  const authReq = req as AuthRequest;
+  await noteDraftsDb.deleteNoteDraft(req.params.noteId, authReq.auth!.id);
+  res.status(204).send();
 });
 
 router.post('/', requireAdmin, async (req: Request, res: Response) => {
@@ -195,6 +326,7 @@ router.post('/:noteId/blocks', requireAdmin, async (req: Request, res: Response)
     pos,
     typeof data === 'object' && data !== null ? data : {}
   );
+  await notesDb.touchNote(req.params.noteId);
   await searchDb.updateSearchableTsv(req.params.noteId);
   res.status(201).json(block);
 });
@@ -216,6 +348,7 @@ router.patch('/:noteId/blocks/:blockId', requireAdmin, async (req: Request, res:
     res.status(400).json({ error: 'BLOCK_NOT_IN_NOTE' });
     return;
   }
+  await notesDb.touchNote(noteId);
   await searchDb.updateSearchableTsv(noteId);
   res.json(block);
 });
@@ -231,12 +364,14 @@ router.delete('/:noteId/blocks/:blockId', requireAdmin, async (req: Request, res
     return;
   }
   await blocksDb.deleteBlock(req.params.blockId);
+  await notesDb.touchNote(req.params.noteId);
   await searchDb.updateSearchableTsv(req.params.noteId);
   res.status(204).send();
 });
 
 router.post('/:noteId/blocks/rebalance', requireAdmin, async (req: Request, res: Response) => {
   await blocksDb.rebalancePositions(req.params.noteId);
+  await notesDb.touchNote(req.params.noteId);
   res.status(204).send();
 });
 

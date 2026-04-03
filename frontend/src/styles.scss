@@ -17,6 +17,55 @@
   --bg-button: #e5e7eb;
   --error-color: #c62828;
   --palette-swatch-border: rgba(17, 24, 39, 0.08);
+  --code-bg: #f8fafc;
+  --code-border: #e2e8f0;
+  --code-header-bg: #eef2ff;
+  --code-header-text: #334155;
+  --code-text: #0f172a;
+  --code-copy-bg: #ffffff;
+  --code-copy-border: #dbe3f0;
+  --code-copy-hover: #f1f5f9;
+  --code-token-comment: #6a737d;
+  --code-token-keyword: #8250df;
+  --code-token-keyword-function: #0550ae;
+  --code-token-function-name: #953800;
+  --code-token-string: #032f62;
+  --code-token-regexp: #0a3069;
+  --code-token-number: #005cc5;
+  --code-token-constant: #0550ae;
+  --code-token-builtin: #6f42c1;
+  --code-token-type: #6f42c1;
+  --code-token-variable: #0969da;
+  --code-token-keyword-let: #0969da;
+  --code-token-keyword-const: #0550ae;
+  --code-token-params: #953800;
+  --code-token-meta: #22863a;
+  --code-token-attribute: #0550ae;
+  --code-token-property: #0550ae;
+  --code-token-operator: #24292f;
+  --code-token-tag: #cf222e;
+  --code-token-link: #0969da;
+  --code-token-template-subst: #0550ae;
+  --code-token-indexed-property: #0550ae;
+  --code-token-index-bracket: #8250df;
+  --code-token-index-expression: #8250df;
+  --code-token-addition: #116329;
+  --code-token-addition-bg: rgba(22, 101, 52, 0.13);
+  --code-token-deletion: #b42318;
+  --code-token-deletion-bg: rgba(185, 28, 28, 0.13);
+  --code-token-selector: #0a3069;
+  --code-token-bracket-1: #0550ae;
+  --code-token-bracket-2: #8250df;
+  --code-token-bracket-3: #bc4c00;
+  --code-token-css-selector: #ca8a04;
+  --code-token-css-property: #0969da;
+  --code-token-css-value: #15803d;
+  --presence-viewing-bg: rgba(59, 130, 246, 0.12);
+  --presence-viewing-text: #1e40af;
+  --presence-viewing-border: rgba(59, 130, 246, 0.26);
+  --presence-editing-bg: rgba(34, 197, 94, 0.14);
+  --presence-editing-text: #166534;
+  --presence-editing-border: rgba(34, 197, 94, 0.28);
   --rt-text-default: #111827;
   --rt-text-muted: #374151;
   --rt-text-subtle: #6b7280;
@@ -63,6 +112,55 @@
   --bg-button: #374151;
   --error-color: #f87171;
   --palette-swatch-border: rgba(243, 244, 246, 0.18);
+  --code-bg: #0f172a;
+  --code-border: #1e293b;
+  --code-header-bg: #111b33;
+  --code-header-text: #cbd5e1;
+  --code-text: #e5edf8;
+  --code-copy-bg: #16203c;
+  --code-copy-border: #2a3858;
+  --code-copy-hover: #1f2b4a;
+  --code-token-comment: #6a9955;
+  --code-token-keyword: #c586c0;
+  --code-token-keyword-function: #569cd6;
+  --code-token-function-name: #dcdcaa;
+  --code-token-string: #ce9178;
+  --code-token-regexp: #d16969;
+  --code-token-number: #b5cea8;
+  --code-token-constant: #4fc1ff;
+  --code-token-builtin: #4ec9b0;
+  --code-token-type: #4ec9b0;
+  --code-token-variable: #9cdcfe;
+  --code-token-keyword-let: #9cdcfe;
+  --code-token-keyword-const: #569cd6;
+  --code-token-params: #9cdcfe;
+  --code-token-meta: #dcdcaa;
+  --code-token-attribute: #9cdcfe;
+  --code-token-property: #9cdcfe;
+  --code-token-operator: #d4d4d4;
+  --code-token-tag: #569cd6;
+  --code-token-link: #4fc1ff;
+  --code-token-template-subst: #9cdcfe;
+  --code-token-indexed-property: #9cdcfe;
+  --code-token-index-bracket: #da70d6;
+  --code-token-index-expression: #da70d6;
+  --code-token-addition: #73c991;
+  --code-token-addition-bg: rgba(115, 201, 145, 0.16);
+  --code-token-deletion: #f14c4c;
+  --code-token-deletion-bg: rgba(241, 76, 76, 0.16);
+  --code-token-selector: #d7ba7d;
+  --code-token-bracket-1: #ffd700;
+  --code-token-bracket-2: #da70d6;
+  --code-token-bracket-3: #4fc1ff;
+  --code-token-css-selector: #facc15;
+  --code-token-css-property: #9cdcfe;
+  --code-token-css-value: #73c991;
+  --presence-viewing-bg: rgba(96, 165, 250, 0.18);
+  --presence-viewing-text: #bfdbfe;
+  --presence-viewing-border: rgba(96, 165, 250, 0.3);
+  --presence-editing-bg: rgba(74, 222, 128, 0.18);
+  --presence-editing-text: #bbf7d0;
+  --presence-editing-border: rgba(74, 222, 128, 0.32);
   --rt-text-default: #f9fafb;
   --rt-text-muted: #e5e7eb;
   --rt-text-subtle: #cbd5e1;
@@ -104,11 +202,15 @@ html, body {
 
 app-unified-note-editor .unified-note-editor {
   min-height: 18rem;
-  padding: 1.25rem 1.35rem;
+  padding: 0 1.35rem 1.25rem;
   color: var(--text-color, #111);
   font-size: 0.98rem;
   line-height: 1.65;
   outline: none;
+}
+
+app-unified-note-editor .editor-surface--editing .unified-note-editor {
+  padding-top: 1.25rem;
 }
 
 /* @tiptap/extensions Selection — inline decoration when editor is blurred (see tiptap.dev/docs/editor/extensions/functionality/selection) */
@@ -176,14 +278,16 @@ app-unified-note-editor .unified-note-editor pre {
   margin: 0.9rem 0;
   padding: 0.95rem 1rem;
   border-radius: 14px;
-  background: #0f172a;
-  color: #e5edf8;
+  border: 1px solid var(--code-border, #1e293b);
+  background: var(--code-bg, #0f172a);
+  color: var(--code-text, #e5edf8);
   overflow-x: auto;
 }
 
 app-unified-note-editor .unified-note-editor pre code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.9rem;
+  color: inherit;
 }
 
 app-unified-note-editor .unified-note-editor code:not(pre code) {
@@ -268,6 +372,306 @@ app-unified-note-editor .unified-note-editor .database-schema-card__body {
   color: var(--text-color, #111);
   white-space: pre-wrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block {
+  margin: 0.95rem 0;
+  border: 1px solid var(--code-border, #1e293b);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--code-bg, #0f172a);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--code-border, #1e293b);
+  background: var(--code-header-bg, #111b33);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__language {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__language-label {
+  color: var(--code-header-text, #cbd5e1);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__language-name {
+  display: none;
+  color: var(--code-header-text, #cbd5e1);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__language-select,
+app-unified-note-editor .unified-note-editor .rich-code-block__copy {
+  border: 1px solid var(--code-copy-border, #2a3858);
+  border-radius: 0.4rem;
+  background: var(--code-copy-bg, #16203c);
+  color: var(--code-header-text, #cbd5e1);
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.2;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__language-select {
+  padding: 0.22rem 0.4rem;
+}
+
+app-unified-note-editor .unified-note-editor[contenteditable='false'] .rich-code-block__language-label,
+app-unified-note-editor .unified-note-editor[contenteditable='false'] .rich-code-block__language-select {
+  display: none;
+}
+
+app-unified-note-editor .unified-note-editor[contenteditable='false'] .rich-code-block__language-name {
+  display: inline;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__copy {
+  padding: 0.24rem 0.5rem;
+  cursor: pointer;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__copy:hover {
+  background: var(--code-copy-hover, #1f2b4a);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block__copy:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-comment,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-quote {
+  color: var(--code-token-comment, #6a9955);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-keyword,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-literal,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-section,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-doctag,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-type {
+  color: var(--code-token-keyword, #c586c0);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-type {
+  color: var(--code-token-type, #4ec9b0);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-selector-class,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-selector-id,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-selector-pseudo,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-selector-attr {
+  color: var(--code-token-selector, #d7ba7d);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-selector-tag,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-tag {
+  color: var(--code-token-tag, #569cd6);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-keyword:has(+ .hljs-title.function_) {
+  color: var(--code-token-keyword-function, #569cd6);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-title.function_ {
+  color: var(--code-token-function-name, #dcdcaa);
+  font-weight: 600;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-title.class_,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-title.class_.inherited__,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-title {
+  color: var(--code-token-function-name, #dcdcaa);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-string,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-attr,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-template-tag,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-template-variable {
+  color: var(--code-token-string, #ce9178);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-regexp {
+  color: var(--code-token-regexp, #d16969);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-number,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-symbol,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-bullet {
+  color: var(--code-token-number, #b5cea8);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-constant,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-variable.constant_,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-variable.language_ {
+  color: var(--code-token-constant, #4fc1ff);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-built_in,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-function {
+  color: var(--code-token-builtin, #4ec9b0);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-variable,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-name {
+  color: var(--code-token-variable, #9cdcfe);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-params {
+  color: var(--code-token-params, #9cdcfe);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-meta {
+  color: var(--code-token-meta, #dcdcaa);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-attribute {
+  color: var(--code-token-attribute, #9cdcfe);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-property {
+  color: var(--code-token-property, #d7ba7d);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-operator {
+  color: var(--code-token-operator, #d4d4d4);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-link {
+  color: var(--code-token-link, #4fc1ff);
+  text-decoration: underline;
+  text-underline-offset: 0.16rem;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-emphasis {
+  font-style: italic;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-strong {
+  font-weight: 700;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-template-variable,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-subst,
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-string .hljs-subst {
+  color: var(--code-token-template-subst, #9cdcfe) !important;
+  font-weight: 600;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-punctuation {
+  color: var(--code-text, #e5edf8);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-addition {
+  color: var(--code-token-addition, #73c991);
+  background: var(--code-token-addition-bg, rgba(115, 201, 145, 0.16));
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .hljs-deletion {
+  color: var(--code-token-deletion, #f14c4c);
+  background: var(--code-token-deletion-bg, rgba(241, 76, 76, 0.16));
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-selector-tag,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-selector-class,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-selector-id,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-selector-pseudo,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-selector-attr {
+  color: var(--code-token-css-selector, #f59e0b) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-attribute,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-property {
+  color: var(--code-token-css-property, #73c991) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-number {
+  color: var(--code-token-css-value, #73c991) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-string,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-built_in,
+app-unified-note-editor .unified-note-editor .rich-code-block code.language-css .hljs-literal {
+  color: var(--code-token-css-value, #c4b5fd) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-bracket-depth-1 {
+  color: var(--code-token-bracket-1, #ffd700);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-bracket-depth-2 {
+  color: var(--code-token-bracket-2, #da70d6);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-bracket-depth-3 {
+  color: var(--code-token-bracket-3, #4fc1ff);
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-member-base {
+  color: var(--code-token-variable, #9cdcfe) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-member-dot {
+  color: var(--code-token-operator, #d4d4d4) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-member-property {
+  color: var(--code-token-property, #d7ba7d) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-indexed-property {
+  color: var(--code-token-indexed-property, #e5c07b) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-index-bracket {
+  color: var(--code-token-index-bracket, #da70d6) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-index-expression {
+  color: var(--code-token-index-expression, #ffd700) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-keyword-let {
+  color: var(--code-token-keyword-let, #9cdcfe) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-keyword-const {
+  color: var(--code-token-keyword-const, #569cd6) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-declaration-variable {
+  color: var(--code-token-variable, #9cdcfe) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-css-value-word {
+  color: var(--code-token-css-value, #c4b5fd) !important;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-template-delimiter {
+  color: var(--code-token-template-subst, #9cdcfe) !important;
+  font-weight: 700;
+}
+
+app-unified-note-editor .unified-note-editor .rich-code-block .code-template-expression {
+  color: var(--code-token-template-subst, #9cdcfe) !important;
 }
 
 app-unified-note-editor .unified-note-editor p.is-empty::before {
@@ -683,6 +1087,13 @@ app-unified-note-editor .toolbar-menu-heading {
   text-transform: uppercase;
 }
 
+app-unified-note-editor .toolbar-menu-heading--hint {
+  padding-top: 0.1rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: none;
+}
+
 app-unified-note-editor .toolbar-menu-item--active {
   background: rgba(25, 118, 210, 0.08);
   color: var(--focus-color, #1976d2);
@@ -784,13 +1195,31 @@ app-unified-note-editor .editor-surface--editing {
 }
 
 app-unified-note-editor .editor-host {
+  --note-content-max-width: 780px;
+  --note-content-inline-padding: 1.35rem;
   min-height: 18rem;
   width: 100%;
-  max-width: 780px;
+  max-width: var(--note-content-max-width, 780px);
   margin: 0 auto;
 }
 
+app-unified-note-editor .editor-surface > .note-header {
+  width: 100%;
+  max-width: var(--note-content-max-width, 780px);
+  box-sizing: border-box;
+  padding-inline: var(--note-content-inline-padding, 1.35rem);
+  margin: 1.1rem auto 1.5rem;
+}
+
+app-unified-note-editor .editor-surface--editing > .note-header {
+  margin-top: 2.25rem;
+}
+
 @media (max-width: 640px) {
+  app-unified-note-editor .editor-host {
+    --note-content-inline-padding: 1rem;
+  }
+
   app-unified-note-editor .note-editor-topbar {
     width: 100vw;
     margin-left: calc(50% - 50vw);
@@ -810,5 +1239,9 @@ app-unified-note-editor .editor-host {
   app-unified-note-editor .toolbar-popover {
     left: auto;
     right: 0;
+  }
+
+  app-unified-note-editor .editor-surface > .note-header {
+    padding-inline: var(--note-content-inline-padding, 1rem);
   }
 }

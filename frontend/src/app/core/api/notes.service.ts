@@ -45,6 +45,25 @@ export interface NoteComment {
   updated_at: string;
 }
 
+export interface NoteDraft {
+  note_id: string;
+  user_id: number;
+  doc: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotePresenceActivity = 'Viewing' | 'Editing';
+
+export interface NotePresenceUser {
+  id: number;
+  label: string;
+  email: string | null;
+  initials: string;
+  avatarColor: string | null;
+  activity: NotePresenceActivity;
+}
+
 const BASE = `${environment.apiUrl}/api/notes`;
 
 @Injectable({ providedIn: 'root' })
@@ -98,6 +117,26 @@ export class NotesService {
 
   listComments(noteId: string): Observable<NoteComment[]> {
     return this.http.get<NoteComment[]>(`${BASE}/${noteId}/comments`);
+  }
+
+  getDraft(noteId: string): Observable<NoteDraft | null> {
+    return this.http.get<NoteDraft | null>(`${BASE}/${noteId}/draft`);
+  }
+
+  saveDraft(noteId: string, doc: Record<string, unknown>): Observable<void> {
+    return this.http.put<void>(`${BASE}/${noteId}/draft`, { doc });
+  }
+
+  clearDraft(noteId: string): Observable<void> {
+    return this.http.delete<void>(`${BASE}/${noteId}/draft`);
+  }
+
+  listPresence(noteId: string): Observable<NotePresenceUser[]> {
+    return this.http.get<NotePresenceUser[]>(`${BASE}/${noteId}/presence`);
+  }
+
+  heartbeatPresence(noteId: string, activity: NotePresenceActivity): Observable<NotePresenceUser[]> {
+    return this.http.post<NotePresenceUser[]>(`${BASE}/${noteId}/presence`, { activity });
   }
 
   createComment(noteId: string, content: string): Observable<NoteComment> {

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NotesService, Note, NoteBlock } from '../../core/api/notes.service';
 import { RecentService } from '../../core/sidebar/recent.service';
@@ -17,8 +17,13 @@ import { UnifiedNoteEditorComponent } from './unified-note-editor';
 })
 export class NoteEditorComponent implements OnInit, OnDestroy {
   protected readonly access = inject(ViewerAccessService);
+  @ViewChild(UnifiedNoteEditorComponent) private unifiedEditor?: UnifiedNoteEditorComponent;
   note = signal<Note | null>(null);
   blocks = signal<NoteBlock[]>([]);
+  titleDraft = signal('');
+  visibilityDraft = signal<'PUBLIC' | 'PRIVATE'>('PRIVATE');
+  titleSaving = signal(false);
+  isEditorEditing = signal(false);
   loading = signal(true);
   error = signal<string | null>(null);
   private sub?: Subscription;
@@ -48,6 +53,9 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
     this.notesService.get(id).subscribe({
       next: (n: Note) => {
         this.note.set(n);
+        this.titleDraft.set(n.title ?? '');
+        this.visibilityDraft.set(n.visibility);
+        this.isEditorEditing.set(false);
         this.recentService.add(n.id, n.title);
         if (this.favouriteService.isNoteFavourite(n.id)) {
           this.favouriteService.setNoteLastVisited(n.id, Date.now());
@@ -153,6 +161,72 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
           }
         : current
     );
+  }
+
+  handleEditingChange(isEditing: boolean): void {
+    this.isEditorEditing.set(isEditing);
+    const current = this.note();
+    if (current) {
+      this.titleDraft.set(current.title ?? '');
+      this.visibilityDraft.set(current.visibility);
+    }
+  }
+
+  updateTitleDraft(value: string): void {
+    this.titleDraft.set(value);
+  }
+
+  handleTitleInputKeydown(event: KeyboardEvent): void {
+    if (!this.isEditorEditing()) return;
+    const key = event.key.toLowerCase();
+    const isModPressed = event.metaKey || event.ctrlKey;
+    if (isModPressed && key === 's') {
+      event.preventDefault();
+      void this.unifiedEditor?.updateEditing();
+      return;
+    }
+    if (!isModPressed && !event.altKey && !event.shiftKey && key === 'escape') {
+      event.preventDefault();
+      this.unifiedEditor?.cancelEditing();
+    }
+  }
+
+  setVisibilityDraft(value: 'PUBLIC' | 'PRIVATE'): void {
+    this.visibilityDraft.set(value);
+  }
+
+  saveHeaderOnUpdate(): void {
+    if (!this.access.canEdit() || this.titleSaving()) return;
+    const current = this.note();
+    if (!current) return;
+    const newTitle = this.titleDraft().trim();
+    const newVisibility = this.visibilityDraft();
+    if (!newTitle) {
+      this.titleDraft.set(current.title ?? '');
+      this.visibilityDraft.set(current.visibility);
+      return;
+    }
+    const changedTitle = newTitle !== current.title;
+    const changedVisibility = newVisibility !== current.visibility;
+    if (!changedTitle && !changedVisibility) {
+      return;
+    }
+    this.titleSaving.set(true);
+    this.notesService.update(current.id, { title: newTitle, visibility: newVisibility }).subscribe({
+      next: (updated) => {
+        this.note.set(updated);
+        this.titleDraft.set(updated.title ?? '');
+        this.visibilityDraft.set(updated.visibility);
+        this.recentService.add(updated.id, updated.title);
+        this.titleSaving.set(false);
+      },
+      error: () => {
+        this.titleDraft.set(current.title ?? '');
+        this.visibilityDraft.set(current.visibility);
+        this.titleSaving.set(false);
+        alert('Failed to update note details');
+      },
+    });
   }
 
 }

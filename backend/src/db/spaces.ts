@@ -69,15 +69,19 @@ export async function getSpaceIdByAboutNoteId(noteId: string): Promise<number | 
 }
 
 /** Create space: root folder (internal), one About note, space row. Content stays empty. */
-export async function createSpace(name: string, avatarKey = 1): Promise<Space> {
+export async function createSpace(
+  name: string,
+  avatarKey = 1,
+  createdByUserId: number | null = null
+): Promise<Space> {
   const trimmedName = name.trim();
   const folder = await foldersDb.createFolder(null, '', '1');
   const aboutNote = await notesDb.createNote(
     folder.id,
-    `About space ${trimmedName}`,
+    `About ${trimmedName} Collection`,
     'PUBLIC',
     '1',
-    null
+    createdByUserId
   );
   const { rows } = await query<SpaceRow>(
     `INSERT INTO spaces (name, root_folder_id, about_note_id, avatar_key) VALUES ($1, $2, $3, $4) RETURNING ${COLS}`,

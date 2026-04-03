@@ -1,5 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import type { JSONContent } from '@tiptap/core';
+import { firstValueFrom } from 'rxjs';
+import { NotesService } from '../../core/api/notes.service';
 
 interface NoteUnsavedState {
   dirty: boolean;
@@ -8,16 +10,17 @@ interface NoteUnsavedState {
 }
 
 type FlushHandler = () => Promise<boolean>;
-const DRAFT_KEY_PREFIX = 'notes:draft:';
+const DRAFT_SAVE_DEBOUNCE_MS = 700;
 
 @Injectable({ providedIn: 'root' })
 export class NoteUnsavedChangesService {
+  constructor(private readonly notesService: NotesService) {}
+
   private readonly handlers = new Map<string, FlushHandler>();
   private readonly state = signal<Record<string, NoteUnsavedState>>({});
-
-  private draftKey(noteId: string): string {
-    return `${DRAFT_KEY_PREFIX}${noteId}`;
-  }
+  private readonly draftCache = new Map<string, JSONContent>();
+  private readonly draftSaveTimers = new Map<string, number>();
+  private readonly draftSaveInFlight = new Map<string, Promise<void>>();
 
   register(noteId: string, handler: FlushHandler): void {
     this.handlers.set(noteId, handler);
@@ -57,33 +60,70 @@ export class NoteUnsavedChangesService {
   }
 
   saveDraft(noteId: string, doc: JSONContent): void {
-    try {
-      localStorage.setItem(this.draftKey(noteId), JSON.stringify(doc));
-    } catch {}
+    this.draftCache.set(noteId, doc);
+    const prevTimerId = this.draftSaveTimers.get(noteId);
+    if (prevTimerId !== undefined) {
+      window.clearTimeout(prevTimerId);
+    }
+    const timerId = window.setTimeout(() => {
+      this.draftSaveTimers.delete(noteId);
+      void this.flushDraftToServer(noteId);
+    }, DRAFT_SAVE_DEBOUNCE_MS);
+    this.draftSaveTimers.set(noteId, timerId);
   }
 
-  readDraft(noteId: string): JSONContent | null {
+  async readDraft(noteId: string): Promise<JSONContent | null> {
+    const cached = this.draftCache.get(noteId);
     try {
-      const raw = localStorage.getItem(this.draftKey(noteId));
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as JSONContent;
-      return parsed && typeof parsed === 'object' ? parsed : null;
-    } catch {
+      const response = await firstValueFrom(this.notesService.getDraft(noteId));
+      if (response?.doc && typeof response.doc === 'object' && !Array.isArray(response.doc)) {
+        const doc = response.doc as JSONContent;
+        this.draftCache.set(noteId, doc);
+        return doc;
+      }
+      this.draftCache.delete(noteId);
       return null;
+    } catch {
+      return cached ?? null;
     }
   }
 
   hasDraft(noteId: string): boolean {
-    try {
-      return localStorage.getItem(this.draftKey(noteId)) !== null;
-    } catch {
-      return false;
-    }
+    return this.draftCache.has(noteId);
   }
 
   clearDraft(noteId: string): void {
-    try {
-      localStorage.removeItem(this.draftKey(noteId));
-    } catch {}
+    this.draftCache.delete(noteId);
+    const timerId = this.draftSaveTimers.get(noteId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      this.draftSaveTimers.delete(noteId);
+    }
+    void firstValueFrom(this.notesService.clearDraft(noteId)).catch(() => undefined);
+  }
+
+  private async flushDraftToServer(noteId: string): Promise<void> {
+    const cached = this.draftCache.get(noteId);
+    if (!cached) return;
+    const inFlight = this.draftSaveInFlight.get(noteId);
+    if (inFlight) {
+      await inFlight;
+      return;
+    }
+    const sentSignature = JSON.stringify(cached);
+    const request = firstValueFrom(
+      this.notesService.saveDraft(noteId, cached as Record<string, unknown>)
+    )
+      .catch(() => undefined)
+      .then(() => undefined)
+      .finally(() => {
+        this.draftSaveInFlight.delete(noteId);
+      });
+    this.draftSaveInFlight.set(noteId, request);
+    await request;
+    const latest = this.draftCache.get(noteId);
+    if (latest && JSON.stringify(latest) !== sentSignature) {
+      void this.flushDraftToServer(noteId);
+    }
   }
 }
