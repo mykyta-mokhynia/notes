@@ -1,4 +1,4 @@
-import { Component, input, output, signal, HostListener, ElementRef, inject } from '@angular/core';
+import { Component, input, output, signal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconChevronRightComponent } from '../icons/icon-chevron-right';
 
@@ -180,8 +180,7 @@ const VIEWPORT_MARGIN_PX = 8;
   ],
 })
 export class SidebarSectionComponent {
-  private hostRef = inject(ElementRef<HTMLElement>);
-
+  private readonly overlaySourceId = `sidebar-section-${Math.random().toString(36).slice(2, 10)}`;
   title = input.required<string>();
   expanded = input<boolean>(true);
   /** When true, content opens in a panel to the right with chevron-right arrow. */
@@ -195,12 +194,24 @@ export class SidebarSectionComponent {
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     if (!this.panelMode() || !this.expanded()) return;
-    const target = event.target as Node;
-    if (this.hostRef.nativeElement.contains(target)) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    // Keep header click behavior deterministic; it already toggles panel state.
+    if (target.closest('.sidebar-section-header')) return;
+    this.expandedChange.emit(false);
+  }
+
+  @HostListener('document:workspace-overlay-opened', ['$event'])
+  onOverlayOpened(event: Event): void {
+    if (!this.panelMode() || !this.expanded()) return;
+    if (!(event instanceof CustomEvent)) return;
+    const sourceId = String(event.detail?.['sourceId'] ?? '');
+    if (!sourceId || sourceId === this.overlaySourceId) return;
     this.expandedChange.emit(false);
   }
 
   onHeaderClick(event: Event): void {
+    const nextExpanded = !this.expanded();
     if (this.panelMode()) {
       const triggerRect = (event.currentTarget as HTMLElement).getBoundingClientRect();
       const viewportWidth = window.innerWidth;
@@ -229,6 +240,15 @@ export class SidebarSectionComponent {
       this.panelTop.set(safeTop);
       this.panelLeft.set(safeLeft);
     }
-    this.expandedChange.emit(!this.expanded());
+    this.expandedChange.emit(nextExpanded);
+    if (this.panelMode() && nextExpanded) {
+      document.dispatchEvent(
+        new CustomEvent('workspace-overlay-opened', {
+          detail: {
+            sourceId: this.overlaySourceId,
+          },
+        })
+      );
+    }
   }
 }

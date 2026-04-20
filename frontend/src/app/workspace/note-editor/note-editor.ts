@@ -1,12 +1,15 @@
 import { Component, OnInit, OnDestroy, signal, inject, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { NotesService, Note, NoteBlock } from '../../core/api/notes.service';
+import { SpacesService, Space } from '../../core/api/spaces.service';
+import { FoldersService, Folder } from '../../core/api/folders.service';
 import { RecentService } from '../../core/sidebar/recent.service';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { CommonModule } from '@angular/common';
-import { Subscription } from 'rxjs';
+import { firstValueFrom, Subscription } from 'rxjs';
 import { ViewerAccessService } from '../../core/access/viewer-access.service';
 import { UnifiedNoteEditorComponent } from './unified-note-editor';
+import { buildNoteToken, buildSpaceToken, parseNoteIdToken } from '../note-links';
 
 @Component({
   selector: 'app-note-editor',
@@ -32,13 +35,15 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
     private route: ActivatedRoute,
     private router: Router,
     private notesService: NotesService,
+    private spacesService: SpacesService,
+    private foldersService: FoldersService,
     private recentService: RecentService,
     private favouriteService: FavouriteService
   ) {}
 
   ngOnInit(): void {
     this.sub = this.route.paramMap.subscribe((params) => {
-      const id = params.get('id');
+      const id = parseNoteIdToken(params.get('id'));
       if (id) this.loadNote(id);
     });
   }
@@ -56,6 +61,7 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
         this.titleDraft.set(n.title ?? '');
         this.visibilityDraft.set(n.visibility);
         this.isEditorEditing.set(false);
+        void this.ensurePrettyRoute(n);
         this.recentService.add(n.id, n.title);
         if (this.favouriteService.isNoteFavourite(n.id)) {
           this.favouriteService.setNoteLastVisited(n.id, Date.now());
@@ -217,6 +223,7 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
         this.note.set(updated);
         this.titleDraft.set(updated.title ?? '');
         this.visibilityDraft.set(updated.visibility);
+        void this.ensurePrettyRoute(updated);
         this.recentService.add(updated.id, updated.title);
         this.titleSaving.set(false);
       },
@@ -227,6 +234,58 @@ export class NoteEditorComponent implements OnInit, OnDestroy {
         alert('Failed to update note details');
       },
     });
+  }
+
+  private async ensurePrettyRoute(note: Note): Promise<void> {
+    const currentToken = this.route.snapshot.paramMap.get('id') ?? '';
+    const currentResolvedNoteId = parseNoteIdToken(currentToken);
+    if (currentResolvedNoteId !== note.id) {
+      return;
+    }
+    const desiredToken = buildNoteToken(note);
+    const currentQuery = this.route.snapshot.queryParamMap;
+
+    const [spaces, folders] = await Promise.all([
+      firstValueFrom(this.spacesService.list()),
+      firstValueFrom(this.foldersService.getTree()),
+    ]);
+    const targetSpace = this.findSpaceForFolder(note.folder_id, spaces, folders);
+    const desiredSpaceToken = targetSpace ? buildSpaceToken(targetSpace) : null;
+    const nextQueryParams: Record<string, string> = {};
+    for (const key of currentQuery.keys) {
+      if (key === 'space') continue;
+      const value = currentQuery.get(key);
+      if (value != null) {
+        nextQueryParams[key] = value;
+      }
+    }
+    if (desiredSpaceToken) {
+      nextQueryParams['space'] = desiredSpaceToken;
+    }
+    const currentSpace = currentQuery.get('space');
+    if (currentToken === desiredToken && currentSpace === desiredSpaceToken) {
+      return;
+    }
+    await this.router.navigate(['/home', 'notes', desiredToken], {
+      queryParams: nextQueryParams,
+      replaceUrl: true,
+    });
+  }
+
+  private findSpaceForFolder(folderId: number, spaces: Space[], folders: Folder[]): Space | null {
+    const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
+    let current = folderMap.get(folderId) ?? null;
+    while (current) {
+      const space = spaces.find((candidate) => candidate.root_folder_id === current!.id);
+      if (space) {
+        return space;
+      }
+      if (current.parent_id == null) {
+        return null;
+      }
+      current = folderMap.get(current.parent_id) ?? null;
+    }
+    return null;
   }
 
 }

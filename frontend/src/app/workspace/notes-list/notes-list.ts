@@ -15,6 +15,7 @@ import { NotesService, Note } from '../../core/api/notes.service';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { CdkDrag, CdkDragDrop, DragDropModule, moveItemInArray, transferArrayItem } from '@angular/cdk/drag-drop';
+import { firstValueFrom } from 'rxjs';
 import { NoteDragService } from '../drag/note-drag.service';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { IconContentComponent } from '../icons/icon-content';
@@ -26,6 +27,9 @@ import { IconStarFullComponent } from '../icons/icon-star-full';
 import { IconTrashComponent } from '../icons/icon-trash';
 import { ViewerAccessService } from '../../core/access/viewer-access.service';
 import { NoteUnsavedChangesService } from '../note-editor/note-unsaved-changes.service';
+import { FoldersService, Folder } from '../../core/api/folders.service';
+import { SpacesService, Space } from '../../core/api/spaces.service';
+import { buildNoteToken, buildSpaceToken } from '../note-links';
 
 /** Delay before showing loading message (avoids flicker on fast loads). */
 const LOADING_MESSAGE_DELAY_MS = 180;
@@ -54,6 +58,7 @@ const MENU_HEIGHT_PX = 180;
 })
 export class NotesListComponent {
   protected readonly access = inject(ViewerAccessService);
+  private readonly overlaySourceId = `notes-list-${Math.random().toString(36).slice(2, 10)}`;
   folderId = input.required<number>();
   selectNote = output<string>();
   /** When false, the "New note" button is hidden (e.g. when using shared Create dropdown). */
@@ -98,7 +103,9 @@ export class NotesListComponent {
     private notesService: NotesService,
     private noteDragService: NoteDragService,
     public favouriteService: FavouriteService,
-    private noteUnsavedChanges: NoteUnsavedChangesService
+    private noteUnsavedChanges: NoteUnsavedChangesService,
+    private foldersService: FoldersService,
+    private spacesService: SpacesService
   ) {
     effect(() => {
       const id = this.folderId();
@@ -122,6 +129,15 @@ export class NotesListComponent {
     }
   }
 
+  @HostListener('document:workspace-overlay-opened', ['$event'])
+  onOverlayOpened(event: Event): void {
+    if (!(event instanceof CustomEvent)) return;
+    const sourceId = String(event.detail?.['sourceId'] ?? '');
+    if (!sourceId || sourceId === this.overlaySourceId) return;
+    this.noteMenuOpenId.set(null);
+    this.noteMenuPosition.set(null);
+  }
+
   toggleNoteMenu(noteId: string, event: Event): void {
     if (!this.access.canEdit()) return;
     event.stopPropagation();
@@ -133,6 +149,7 @@ export class NotesListComponent {
     } else {
       this.noteMenuOpenId.set(noteId);
       this.noteMenuPosition.set(rect ? this.getSafeMenuPosition(rect) : null);
+      this.dispatchOverlayOpened();
     }
   }
 
@@ -205,6 +222,27 @@ export class NotesListComponent {
       },
       error: () => alert('Failed to delete note'),
     });
+  }
+
+  async onCopyNoteLink(note: Note): Promise<void> {
+    const noteToken = buildNoteToken(note);
+    let query = '';
+    try {
+      const [spaces, folders] = await Promise.all([
+        firstValueFrom(this.spacesService.list()),
+        firstValueFrom(this.foldersService.getTree()),
+      ]);
+      const space = this.findSpaceForFolder(note.folder_id, spaces, folders);
+      if (space) {
+        query = `?space=${encodeURIComponent(buildSpaceToken(space))}`;
+      }
+    } catch {
+      query = '';
+    }
+    const url = new URL(`/home/notes/${noteToken}${query}`, window.location.origin).toString();
+    await navigator.clipboard.writeText(url);
+    this.noteMenuOpenId.set(null);
+    this.noteMenuPosition.set(null);
   }
 
   onNoteDrop(event: CdkDragDrop<Note[]>): void {
@@ -341,6 +379,28 @@ export class NotesListComponent {
       data !== null &&
       'folder_id' in data &&
       'visibility' in data
+    );
+  }
+
+  private findSpaceForFolder(folderId: number, spaces: Space[], folders: Folder[]): Space | null {
+    const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
+    let current = folderMap.get(folderId) ?? null;
+    while (current) {
+      const space = spaces.find((candidate) => candidate.root_folder_id === current!.id);
+      if (space) return space;
+      if (current.parent_id == null) return null;
+      current = folderMap.get(current.parent_id) ?? null;
+    }
+    return null;
+  }
+
+  private dispatchOverlayOpened(): void {
+    document.dispatchEvent(
+      new CustomEvent('workspace-overlay-opened', {
+        detail: {
+          sourceId: this.overlaySourceId,
+        },
+      })
     );
   }
 }

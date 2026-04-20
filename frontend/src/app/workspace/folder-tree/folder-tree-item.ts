@@ -57,7 +57,6 @@ export class FolderTreeItemComponent implements OnDestroy {
   /** Emitted when + is clicked so parent can set creatingUnderParentId. */
   startCreating = output<number>();
   private foldersService = inject(FoldersService);
-  private hostRef = inject(ElementRef<HTMLElement>);
   /** Emitted when a new folder is created under this folder. */
   folderCreated = output<Folder>();
   /** Emitted when this folder's title is renamed. */
@@ -121,8 +120,10 @@ export class FolderTreeItemComponent implements OnDestroy {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
-    const target = event.target as Node | null;
-    if (target && this.hostRef.nativeElement.contains(target)) return;
+    const target = event.target as HTMLElement | null;
+    const insideCreateControls =
+      target?.closest?.('.folder-create-wrap') != null || target?.closest?.('.folder-create-dropdown') != null;
+    if (insideCreateControls) return;
     this.createDropdownOpen.set(false);
     this.createDropdownPosition.set(null);
   }

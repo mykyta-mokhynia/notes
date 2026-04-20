@@ -81,6 +81,10 @@
         }
         <span>Favourites</span>
       </button>
+      <button type="button" class="note-menu-item" (click)="onCopyNoteLink(note)">
+        <span class="note-menu-item-icon">🔗</span>
+        <span>Copy link</span>
+      </button>
       <div class="note-menu-divider"></div>
       <button type="button" class="note-menu-item note-menu-item--danger" (click)="onDeleteNote(note)">
         <app-icon-trash></app-icon-trash>

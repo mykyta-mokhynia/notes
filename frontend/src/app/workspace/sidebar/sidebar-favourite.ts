@@ -11,6 +11,7 @@ import { IconStarFullComponent } from '../icons/icon-star-full';
 import { IconSpaceAvatarComponent } from '../icons/icon-space-avatar';
 import { IconFolderComponent } from '../icons/icon-folder';
 import { IconContentComponent } from '../icons/icon-content';
+import { buildSpaceToken } from '../note-links';
 
 @Component({
   selector: 'app-sidebar-favourite',
@@ -52,7 +53,7 @@ import { IconContentComponent } from '../icons/icon-content';
               <ul class="sidebar-list">
                 @for (s of spaces(); track s.id) {
                   <li>
-                    <a [routerLink]="['/home']" [queryParams]="{ space: s.id }" class="sidebar-link sidebar-link--with-meta" (click)="expanded.set(false)">
+                    <a [routerLink]="['/home']" [queryParams]="{ space: spaceQueryToken(s) }" class="sidebar-link sidebar-link--with-meta" (click)="expanded.set(false)">
                       <span class="sidebar-link-icon"><app-icon-space-avatar [avatarKey]="s.avatar_key ?? 1"></app-icon-space-avatar></span>
                       <span class="sidebar-link-text">
                         <span class="sidebar-link-title">{{ s.name }}</span>
@@ -255,6 +256,10 @@ export class SidebarFavouriteComponent implements OnInit {
     const date = visited != null ? visited : n.updated_at;
     const formatted = this.datePipe.transform(date, 'short') ?? '';
     return visited != null ? `Visited ${formatted}` : `Updated ${formatted}`;
+  }
+
+  spaceQueryToken(space: Space): string {
+    return buildSpaceToken(space);
   }
 
   private load(): void {

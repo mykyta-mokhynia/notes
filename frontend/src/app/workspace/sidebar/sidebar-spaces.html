@@ -151,6 +151,10 @@
           <app-icon-edit></app-icon-edit>
           <span>Edit</span>
         </button>
+        <button type="button" class="space-menu-item" (click)="onCopySpaceLink(space)">
+          <span class="space-menu-item-icon-wrap">🔗</span>
+          <span>Copy link</span>
+        </button>
         <button type="button" class="space-menu-item" (click)="onToggleVisibility(space)">
           @if (space.visibility === 'PUBLIC') {
             <span class="space-menu-item-icon-wrap"><app-icon-eye-slash></app-icon-eye-slash></span>

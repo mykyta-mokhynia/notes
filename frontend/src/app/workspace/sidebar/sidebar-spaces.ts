@@ -37,6 +37,7 @@ import { EditSpaceModalComponent } from './edit-space-modal/edit-space-modal';
 import { DeleteSpaceModalComponent } from './delete-space-modal/delete-space-modal';
 import { FavouriteService } from '../../core/sidebar/favourite.service';
 import { ViewerAccessService } from '../../core/access/viewer-access.service';
+import { buildSpaceToken, parseNoteIdToken, resolveSpaceIdToken } from '../note-links';
 
 @Component({
   selector: 'app-sidebar-spaces',
@@ -70,6 +71,7 @@ import { ViewerAccessService } from '../../core/access/viewer-access.service';
 })
 export class SidebarSpacesComponent implements OnInit {
   protected readonly access = inject(ViewerAccessService);
+  private readonly overlaySourceId = `sidebar-spaces-${Math.random().toString(36).slice(2, 10)}`;
   selectNote = output<string>();
 
   spaces = signal<Space[]>([]);
@@ -105,7 +107,7 @@ export class SidebarSpacesComponent implements OnInit {
   folderTreeRefs = viewChildren(FolderTreeComponent);
   notesListRefs = viewChildren(NotesListComponent);
   private queryFolderId: number | null = null;
-  private querySpaceId: number | null = null;
+  private querySpaceToken: string | null = null;
 
   expandedSpace = computed(() => {
     const id = this.expandedSpaceId();
@@ -156,6 +158,15 @@ export class SidebarSpacesComponent implements OnInit {
     }
   }
 
+  @HostListener('document:workspace-overlay-opened', ['$event'])
+  onOverlayOpened(event: Event): void {
+    if (!(event instanceof CustomEvent)) return;
+    const sourceId = String(event.detail?.['sourceId'] ?? '');
+    if (!sourceId || sourceId === this.overlaySourceId) return;
+    this.closeContentCreate();
+    this.closeSpaceMenu();
+  }
+
   ngOnInit(): void {
     this.loadSidebarData();
     this.route.queryParamMap.subscribe((params) => {
@@ -165,10 +176,7 @@ export class SidebarSpacesComponent implements OnInit {
       if (this.queryFolderId != null && Number.isNaN(this.queryFolderId)) {
         this.queryFolderId = null;
       }
-      this.querySpaceId = spaceParam ? parseInt(spaceParam, 10) : null;
-      if (this.querySpaceId != null && Number.isNaN(this.querySpaceId)) {
-        this.querySpaceId = null;
-      }
+      this.querySpaceToken = spaceParam?.trim() ? spaceParam.trim() : null;
       this.applySelectionFromQuery();
     });
   }
@@ -178,9 +186,10 @@ export class SidebarSpacesComponent implements OnInit {
     const spaceId = this.expandedSpaceId();
     const space = spaceId != null ? this.spaces().find((s) => s.id === spaceId) ?? null : null;
     const folderId = space ? this.getActiveFolderId(space) : null;
+    const spaceToken = space ? buildSpaceToken(space) : null;
     this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { space: spaceId ?? null, folder: folderId ?? null },
+      queryParams: { space: spaceToken, folder: folderId ?? null },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -242,11 +251,13 @@ export class SidebarSpacesComponent implements OnInit {
       }
     }
 
-    if (this.querySpaceId != null) {
-      const space = spaces.find((s) => s.id === this.querySpaceId);
+    const querySpaceId = resolveSpaceIdToken(this.querySpaceToken, spaces);
+    if (querySpaceId != null) {
+      const space = spaces.find((s) => s.id === querySpaceId);
       if (space) {
         this.expandedSpaceId.set(space.id);
         this.selectedFolderId.set(space.root_folder_id);
+        this.openSpaceAboutIfNeeded(space);
         return;
       }
     }
@@ -268,7 +279,7 @@ export class SidebarSpacesComponent implements OnInit {
       this.selectedFolderId.set(space.root_folder_id);
       this.contentExpanded.set(true);
       this.updateUrlFromSelection();
-      if (this.hasAboutNote(space)) this.selectNote.emit(space.about_note_id!);
+      this.openSpaceAboutIfNeeded(space);
     } else {
       this.updateUrlFromSelection();
     }
@@ -321,7 +332,7 @@ export class SidebarSpacesComponent implements OnInit {
         this.selectedFolderId.set(space.root_folder_id);
         this.contentExpanded.set(true);
         this.refreshFolders();
-        if (this.hasAboutNote(space)) this.selectNote.emit(space.about_note_id!);
+        this.openSpaceAboutIfNeeded(space);
       },
       error: (err) => {
         const msg =
@@ -360,6 +371,18 @@ export class SidebarSpacesComponent implements OnInit {
     this.selectNote.emit(noteId);
   }
 
+  private openSpaceAboutIfNeeded(space: Space): void {
+    if (!this.hasAboutNote(space)) return;
+    const aboutId = space.about_note_id!;
+    if (this.currentOpenedNoteId() === aboutId) return;
+    this.selectNote.emit(aboutId);
+  }
+
+  private currentOpenedNoteId(): string | null {
+    const match = this.router.url.match(/\/home\/notes\/([^/?#]+)/i);
+    return parseNoteIdToken(match?.[1] ?? null);
+  }
+
   toggleContentCreate(space: Space, event: Event): void {
     if (!this.access.canEdit()) return;
     const btn = (event.target as HTMLElement).closest('button') as HTMLElement;
@@ -372,6 +395,7 @@ export class SidebarSpacesComponent implements OnInit {
       this.contentCreatePosition.set(
         rect ? { top: rect.bottom + 4, left: rect.left } : null
       );
+      this.dispatchOverlayOpened();
     }
   }
 
@@ -471,6 +495,7 @@ export class SidebarSpacesComponent implements OnInit {
       this.spaceMenuPosition.set(
         rect ? { top: rect.bottom + 4, left: rect.left } : null
       );
+      this.dispatchOverlayOpened();
     }
   }
 
@@ -480,6 +505,13 @@ export class SidebarSpacesComponent implements OnInit {
     this.spaceMenuPosition.set(null);
     this.editSpaceError.set(null);
     this.editSpaceId.set(space.id);
+  }
+
+  onCopySpaceLink(space: Space): void {
+    const token = buildSpaceToken(space);
+    const url = new URL(`/home?space=${encodeURIComponent(token)}`, window.location.origin).toString();
+    void navigator.clipboard.writeText(url);
+    this.closeSpaceMenu();
   }
 
   onToggleVisibility(space: Space): void {
@@ -555,5 +587,15 @@ export class SidebarSpacesComponent implements OnInit {
 
   closeDeleteSpaceModal(): void {
     this.deleteSpaceId.set(null);
+  }
+
+  private dispatchOverlayOpened(): void {
+    document.dispatchEvent(
+      new CustomEvent('workspace-overlay-opened', {
+        detail: {
+          sourceId: this.overlaySourceId,
+        },
+      })
+    );
   }
 }

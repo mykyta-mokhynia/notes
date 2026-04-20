@@ -34,15 +34,19 @@ import TableCell from '@tiptap/extension-table-cell';
 import Placeholder from '@tiptap/extension-placeholder';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Selection } from '@tiptap/extensions/selection';
-import { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { Mark as ProseMirrorMark, Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { createLowlight, common } from 'lowlight';
-import { ActivatedRoute } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
+import { ActivatedRoute, Router } from '@angular/router';
+import { firstValueFrom, forkJoin, of } from 'rxjs';
 import { Note, NoteBlock, NotePresenceUser, NotesService } from '../../core/api/notes.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { NoteUnsavedChangesService } from './note-unsaved-changes.service';
+import { Space, SpacesService } from '../../core/api/spaces.service';
+import { Folder, FoldersService } from '../../core/api/folders.service';
+import { SPACE_AVATAR_OPTIONS } from '../icons/icon-space-avatar';
+import { buildNoteToken, buildSpaceToken, parseNoteIdToken, resolveSpaceIdToken } from '../note-links';
 
 const RICH_TEXT_BLOCK_TYPE = 'rich_text';
 const LEGACY_TEXT_BLOCK_TYPE = 'text';
@@ -170,6 +174,39 @@ interface AlignOption {
   shortcut?: string;
 }
 
+interface FocusedLinkState {
+  from: number;
+  to: number;
+  href: string;
+  label: string;
+  kind: 'note' | 'space' | 'external';
+  view: LinkViewMode;
+  left: number;
+  top: number;
+}
+
+type LinkViewMode = 'inline' | 'text';
+type LinkEditorMode = 'insert' | 'edit';
+
+interface LinkEditorState {
+  mode: LinkEditorMode;
+  from: number;
+  to: number;
+  empty: boolean;
+  href: string;
+  label: string;
+  left: number;
+  top: number;
+  error: string | null;
+}
+
+interface LinkMenuIcons {
+  copy: string;
+  follow: string;
+  edit: string;
+  unlink: string;
+}
+
 const HEADING_OPTIONS: HeadingOption[] = [
   { value: 'paragraph', label: 'Normal Text', shortcut: 'Mod+Alt+0' },
   { value: 'h1', label: 'Heading 1', level: 1, shortcut: 'Mod+Alt+1' },
@@ -258,6 +295,38 @@ const TOOLBAR_ICONS: Record<ToolbarIconName, ToolbarIcon> = {
   },
 };
 
+const LINK_MENU_ICONS: LinkMenuIcons = {
+  copy: 'M288 64C252.7 64 224 92.7 224 128L224 384C224 419.3 252.7 448 288 448L480 448C515.3 448 544 419.3 544 384L544 183.4C544 166 536.9 149.3 524.3 137.2L466.6 81.8C454.7 70.4 438.8 64 422.3 64L288 64zM160 192C124.7 192 96 220.7 96 256L96 512C96 547.3 124.7 576 160 576L352 576C387.3 576 416 547.3 416 512L416 496L352 496L352 512L160 512L160 256L176 256L176 192L160 192z',
+  follow:
+    'M384 64C366.3 64 352 78.3 352 96C352 113.7 366.3 128 384 128L466.7 128L265.3 329.4C252.8 341.9 252.8 362.2 265.3 374.7C277.8 387.2 298.1 387.2 310.6 374.7L512 173.3L512 256C512 273.7 526.3 288 544 288C561.7 288 576 273.7 576 256L576 96C576 78.3 561.7 64 544 64L384 64zM144 160C99.8 160 64 195.8 64 240L64 496C64 540.2 99.8 576 144 576L400 576C444.2 576 480 540.2 480 496L480 416C480 398.3 465.7 384 448 384C430.3 384 416 398.3 416 416L416 496C416 504.8 408.8 512 400 512L144 512C135.2 512 128 504.8 128 496L128 240C128 231.2 135.2 224 144 224L224 224C241.7 224 256 209.7 256 192C256 174.3 241.7 160 224 160L144 160z',
+  edit: 'M535.6 85.7C513.7 63.8 478.3 63.8 456.4 85.7L432 110.1L529.9 208L554.3 183.6C576.2 161.7 576.2 126.3 554.3 104.4L535.6 85.7zM236.4 305.7C230.3 311.8 225.6 319.3 222.9 327.6L193.3 416.4C190.4 425 192.7 434.5 199.1 441C205.5 447.5 215 449.7 223.7 446.8L312.5 417.2C320.7 414.5 328.2 409.8 334.4 403.7L496 241.9L398.1 144L236.4 305.7zM160 128C107 128 64 171 64 224L64 480C64 533 107 576 160 576L416 576C469 576 512 533 512 480L512 384C512 366.3 497.7 352 480 352C462.3 352 448 366.3 448 384L448 480C448 497.7 433.7 512 416 512L160 512C142.3 512 128 497.7 128 480L128 224C128 206.3 142.3 192 160 192L256 192C273.7 192 288 177.7 288 160C288 142.3 273.7 128 256 128L160 128z',
+  unlink:
+    'M416 480C433.7 480 448 494.3 448 512L448 576C448 593.7 433.7 608 416 608C398.3 608 384 593.7 384 576L384 512C384 494.3 398.3 480 416 480zM89.4 265.4C101.9 252.9 122.2 252.9 134.6 265.4C147 277.9 147.1 298.2 134.6 310.6L123.1 322.2C105.8 339.5 96 363.1 96 387.6C96 438.6 137.4 480 188.4 480C212.9 480 236.4 470.2 253.8 452.9L329.4 377.4C341.9 364.9 362.2 364.9 374.6 377.4C387 389.9 387.1 410.2 374.6 422.6L299.1 498.2C269.8 527.5 229.9 544 188.4 544C102 544 32 474 32 387.6C32 346.1 48.5 306.2 77.8 276.9L89.4 265.4zM473.4 441.4C485.9 428.9 506.2 428.9 518.6 441.4L566.6 489.4C579.1 501.9 579.1 522.2 566.6 534.6C554.1 547 533.8 547.1 521.4 534.6L473.4 486.6C460.9 474.1 460.9 453.8 473.4 441.4zM451.6 96C538 96 608 166 608 252.4C608 293.9 591.5 333.7 562.2 363.1L550.6 374.6C538.1 387.1 517.8 387.1 505.4 374.6C493 362.1 492.9 341.8 505.4 329.4L516.9 317.8C534.2 300.5 544 276.9 544 252.4C544 201.4 502.6 160 451.6 160C427.1 160 403.6 169.8 386.2 187.1L310.6 262.6C298.1 275.1 277.8 275.1 265.4 262.6C253 250.1 252.9 229.8 265.4 217.4L340.9 141.8C370.2 112.5 410.1 96 451.6 96zM73.4 105.4C85.9 92.9 106.2 92.9 118.6 105.4L166.6 153.4C179.1 165.9 179.1 186.2 166.6 198.6C154.1 211 133.8 211.1 121.4 198.6L73.4 150.6C60.9 138.1 60.9 117.8 73.4 105.4zM224 32C241.7 32 256 46.3 256 64L256 128C256 145.7 241.7 160 224 160C206.3 160 192 145.7 192 128L192 64C192 46.3 206.3 32 224 32z',
+};
+
+const SPACE_AVATAR_PATH_BY_KEY = new Map<number, string>(SPACE_AVATAR_OPTIONS.map((option) => [option.key, option.path]));
+
+const AppLink = Link.extend({
+  addAttributes() {
+    const parent = this.parent?.() ?? {};
+    return {
+      ...parent,
+      'data-app-link-kind': {
+        default: 'external',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-app-link-kind') ?? 'external',
+        renderHTML: (attributes: Record<string, unknown>) =>
+          attributes['data-app-link-kind'] ? { 'data-app-link-kind': String(attributes['data-app-link-kind']) } : {},
+      },
+      'data-app-link-view': {
+        default: 'text',
+        parseHTML: (element: HTMLElement) => element.getAttribute('data-app-link-view') ?? 'text',
+        renderHTML: (attributes: Record<string, unknown>) =>
+          attributes['data-app-link-view'] ? { 'data-app-link-view': String(attributes['data-app-link-view']) } : {},
+      },
+    };
+  },
+});
+
 function emptyDoc(): JSONContent {
   return {
     type: 'doc',
@@ -278,6 +347,26 @@ function paragraphFromText(text: string): JSONContent[] {
     type: 'paragraph',
     content: [{ type: 'text', text: chunk.replace(/\n/g, ' ') }],
   }));
+}
+
+function splitMarkupLinkText(text: string): Array<{ kind: 'text' | 'link'; value: string; href?: string }> {
+  const result: Array<{ kind: 'text' | 'link'; value: string; href?: string }> = [];
+  const regex = /\[([^\]|]+?)\s*\|\s*([^\]]+?)\]/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null = regex.exec(text);
+  while (match) {
+    const index = match.index;
+    if (index > lastIndex) {
+      result.push({ kind: 'text', value: text.slice(lastIndex, index) });
+    }
+    result.push({ kind: 'link', value: match[1] ?? '', href: match[2] ?? '' });
+    lastIndex = regex.lastIndex;
+    match = regex.exec(text);
+  }
+  if (lastIndex < text.length) {
+    result.push({ kind: 'text', value: text.slice(lastIndex) });
+  }
+  return result;
 }
 
 function cloneContent(content: JSONContent[] | undefined): JSONContent[] {
@@ -864,6 +953,7 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
           aria-label="Note formatting toolbar"
           (pointerdown)="preserveToolbarSelection($event)"
           (mousedown)="preserveToolbarSelection($event)"
+          (click)="onToolbarClick($event)"
         >
           <div class="editor-toolbar__group">
             <div class="toolbar-anchor">
@@ -1255,6 +1345,8 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
               class="toolbar-btn toolbar-btn--icon"
               [class.toolbar-btn--active]="isMarkActive('link')"
               [attr.title]="buttonTitle('Insert link', 'Mod+K', '🔗')"
+              (pointerdown)="preserveToolbarSelection($event)"
+              (mousedown)="preserveToolbarSelection($event)"
               (click)="insertLink()"
             >
               <span class="toolbar-icon" aria-hidden="true">
@@ -1319,6 +1411,121 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
       <section class="editor-surface" #editorSurface [class.editor-surface--editing]="editorEnabled()">
         <ng-content select="[note-header-slot]"></ng-content>
         <div #editorHost class="editor-host"></div>
+        @if (focusedLinkMenu(); as menu) {
+          <div
+            class="link-focus-menu"
+            [style.left.px]="menu.left"
+            [style.top.px]="menu.top"
+            (pointerdown)="preserveLinkMenuSelection($event)"
+            (mousedown)="preserveLinkMenuSelection($event)"
+            (mouseenter)="onLinkMenuMouseEnter()"
+            (mouseleave)="onLinkMenuMouseLeave()"
+          >
+            @if (editorEnabled()) {
+              <span
+                class="link-focus-menu__text-action"
+                data-tooltip="Toggle URL and smart title."
+                role="button"
+                tabindex="0"
+                (click)="toggleFocusedLinkView()"
+                (keydown.enter)="toggleFocusedLinkView()"
+                (keydown.space)="toggleFocusedLinkView(); $event.preventDefault()"
+              >
+                text
+              </span>
+              <button
+                type="button"
+                class="link-focus-menu__btn"
+                data-tooltip="Edit URL and display title."
+                aria-label="Edit link"
+                (click)="editFocusedLink()"
+              >
+                <svg viewBox="0 0 640 640" focusable="false" aria-hidden="true">
+                  <path [attr.d]="linkMenuIcons.edit"></path>
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="link-focus-menu__btn"
+                data-tooltip="Remove link and keep text."
+                aria-label="Remove link"
+                (click)="removeFocusedLink()"
+              >
+                <svg viewBox="0 0 640 640" focusable="false" aria-hidden="true">
+                  <path [attr.d]="linkMenuIcons.unlink"></path>
+                </svg>
+              </button>
+            }
+            <button
+              type="button"
+              class="link-focus-menu__btn"
+              data-tooltip="Open link target in a new tab."
+              aria-label="Open link"
+              (click)="openFocusedLink()"
+            >
+              <svg viewBox="0 0 640 640" focusable="false" aria-hidden="true">
+                <path [attr.d]="linkMenuIcons.follow"></path>
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="link-focus-menu__btn"
+              data-tooltip="Copy URL to clipboard."
+              aria-label="Copy link"
+              (click)="copyFocusedLink()"
+            >
+              <svg viewBox="0 0 640 640" focusable="false" aria-hidden="true">
+                <path [attr.d]="linkMenuIcons.copy"></path>
+              </svg>
+            </button>
+          </div>
+        }
+        @if (linkEditorState(); as editorState) {
+          <form
+            class="link-editor-popover"
+            [style.left.px]="editorState.left"
+            [style.top.px]="editorState.top"
+            (pointerdown)="preserveLinkMenuSelection($event)"
+            (mousedown)="preserveLinkMenuSelection($event)"
+            (submit)="submitLinkEditor(); $event.preventDefault()"
+          >
+            <div class="link-editor-popover__title">
+              {{ editorState.mode === 'insert' ? 'Insert link' : 'Edit link' }}
+            </div>
+            <label class="link-editor-popover__field">
+              URL
+              <input
+                type="text"
+                class="link-editor-popover__input"
+                placeholder="https://example.com or /home/notes/..."
+                [value]="editorState.href"
+                (input)="onLinkEditorHrefInput($event)"
+                (keydown.escape)="cancelLinkEditor(); $event.preventDefault()"
+                autofocus
+              />
+            </label>
+            <label class="link-editor-popover__field">
+              Text
+              <input
+                type="text"
+                class="link-editor-popover__input"
+                placeholder="Display text"
+                [value]="editorState.label"
+                (input)="onLinkEditorLabelInput($event)"
+                (keydown.escape)="cancelLinkEditor(); $event.preventDefault()"
+              />
+            </label>
+            @if (editorState.error) {
+              <div class="link-editor-popover__error">{{ editorState.error }}</div>
+            }
+            <div class="link-editor-popover__actions">
+              <button type="button" class="link-editor-popover__btn link-editor-popover__btn--ghost" (click)="cancelLinkEditor()">
+                Cancel
+              </button>
+              <button type="submit" class="link-editor-popover__btn">Apply</button>
+            </div>
+          </form>
+        }
       </section>
     </div>
   `,
@@ -1633,6 +1840,162 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
         color: var(--error-color, #c62828);
       }
 
+      .link-focus-menu {
+        position: fixed;
+        z-index: 18;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.32rem;
+        padding: 0.36rem;
+        border-radius: 0.72rem;
+        border: 1px solid var(--border-color, #d8dde6);
+        background: var(--dropdown-bg, var(--bg-color, #fff));
+        box-shadow: 0 14px 28px rgba(2, 6, 23, 0.2);
+      }
+
+      .link-focus-menu__btn {
+        width: 2rem;
+        height: 2rem;
+        border: 0;
+        border-radius: 0.5rem;
+        background: transparent;
+        color: var(--text-color, #111);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.95rem;
+        font-weight: 600;
+        line-height: 1;
+        transition: background-color 120ms ease, color 120ms ease;
+        position: relative;
+      }
+
+      .link-focus-menu__text-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 2.1rem;
+        height: 2rem;
+        padding: 0 0.45rem;
+        border-radius: 0.5rem;
+        color: var(--text-color, #111);
+        cursor: pointer;
+        text-transform: lowercase;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        transition: background-color 120ms ease, color 120ms ease;
+        position: relative;
+      }
+
+      .link-focus-menu__btn:hover {
+        background: var(--hover-bg, #f5f7fb);
+        color: var(--focus-color, #1976d2);
+      }
+
+      .link-focus-menu__text-action:hover,
+      .link-focus-menu__text-action:focus-visible {
+        background: var(--hover-bg, #f5f7fb);
+        color: var(--focus-color, #1976d2);
+        outline: none;
+      }
+
+      .link-focus-menu__btn svg {
+        width: 1.12rem;
+        height: 1.12rem;
+        fill: currentColor;
+      }
+
+      .link-focus-menu__btn[data-tooltip]:hover::after,
+      .link-focus-menu__text-action[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        left: 50%;
+        top: calc(100% + 0.45rem);
+        transform: translateX(-50%);
+        white-space: nowrap;
+        padding: 0.33rem 0.5rem;
+        border-radius: 0.4rem;
+        background: rgba(15, 23, 42, 0.92);
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 500;
+        pointer-events: none;
+        z-index: 20;
+      }
+
+      .link-editor-popover {
+        position: fixed;
+        z-index: 19;
+        display: flex;
+        flex-direction: column;
+        gap: 0.55rem;
+        width: min(24rem, calc(100vw - 1.5rem));
+        padding: 0.75rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--border-color, #d8dde6);
+        background: var(--dropdown-bg, var(--bg-color, #fff));
+        box-shadow: 0 14px 28px rgba(2, 6, 23, 0.24);
+      }
+
+      .link-editor-popover__title {
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: var(--text-color, #111);
+      }
+
+      .link-editor-popover__field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--muted-text, #5f6b7f);
+      }
+
+      .link-editor-popover__input {
+        height: 2rem;
+        border: 1px solid var(--border-color, #d8dde6);
+        border-radius: 0.48rem;
+        padding: 0 0.56rem;
+        background: var(--bg-color, #fff);
+        color: var(--text-color, #111);
+        font: inherit;
+      }
+
+      .link-editor-popover__input:focus-visible {
+        outline: 2px solid var(--focus-ring-color, rgba(25, 118, 210, 0.35));
+        outline-offset: 1px;
+      }
+
+      .link-editor-popover__error {
+        font-size: 0.74rem;
+        color: var(--error-color, #c62828);
+      }
+
+      .link-editor-popover__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.42rem;
+      }
+
+      .link-editor-popover__btn {
+        border: 0;
+        border-radius: 0.45rem;
+        padding: 0.42rem 0.7rem;
+        background: var(--focus-color, #1976d2);
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .link-editor-popover__btn--ghost {
+        background: var(--hover-bg, #edf2f8);
+        color: var(--text-color, #111);
+      }
+
       @media (max-width: 640px) {
         .note-header-top {
           padding-inline: 0.75rem;
@@ -1678,7 +2041,10 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly auth = inject(AuthService);
   private readonly hostElement = inject(ElementRef<HTMLElement>);
   private readonly notesService = inject(NotesService);
+  private readonly spacesService = inject(SpacesService);
+  private readonly foldersService = inject(FoldersService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly unsavedChanges = inject(NoteUnsavedChangesService);
 
   readonly isEditing = signal(false);
@@ -1695,8 +2061,10 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly tablePreview = signal<{ rows: number; cols: number } | null>(null);
   readonly selectionVersion = signal(0);
   readonly presenceUsers = signal<NoteActiveUser[]>([]);
+  readonly focusedLinkMenu = signal<FocusedLinkState | null>(null);
 
   readonly toolbarIcons = TOOLBAR_ICONS;
+  readonly linkMenuIcons = LINK_MENU_ICONS;
   readonly headingOptions = HEADING_OPTIONS;
   readonly formatMenuItems = FORMAT_MENU_ITEMS;
   readonly alignOptions = ALIGN_OPTIONS;
@@ -1727,6 +2095,7 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   private suppressUpdates = false;
   private currentPersistPromise: Promise<boolean> | null = null;
   private restoreDraftOnMount = false;
+  private readonlyDocBeforeEdit: JSONContent | null = null;
   private toolbarSelection: { from: number; to: number } | null = null;
   private selectionVersionQueued = false;
   private mountEditorQueued = false;
@@ -1736,6 +2105,18 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   private modeScrollFrameId: number | null = null;
   private lastAppliedEditorMode: boolean | null = null;
   private draftRequestVersion = 0;
+  private linkMenuHideTimeoutId: number | null = null;
+  private linkMenuHovered = false;
+  private linkAutoEnhanceTimerId: number | null = null;
+  private linkAutoEnhanceInFlight = false;
+  private syncLinkAttrsTimerId: number | null = null;
+  private syncSpaceLinkIconsTimerId: number | null = null;
+  private readonly noteCache = new Map<string, Note | null>();
+  private spacesCache: Space[] | null = null;
+  private foldersCache: Folder[] | null = null;
+  private readonly aboutSpaceByNoteId = new Map<string, Space>();
+  private readonly spaceAvatarKeyById = new Map<number, number>();
+  readonly linkEditorState = signal<LinkEditorState | null>(null);
 
   constructor() {
     effect(() => {
@@ -1743,6 +2124,9 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       this.editor?.setEditable(editable);
       this.syncEditorModeClass();
       this.queueSelectionVersionUpdate();
+      if (editable) {
+        this.hideFocusedLinkMenu();
+      }
       if (this.lastAppliedEditorMode !== editable) {
         this.lastAppliedEditorMode = editable;
         this.queueModeScrollAlignment();
@@ -1815,6 +2199,19 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     if (this.modeScrollFrameId !== null) {
       window.cancelAnimationFrame(this.modeScrollFrameId);
       this.modeScrollFrameId = null;
+    }
+    this.cancelLinkMenuHideTimer();
+    if (this.linkAutoEnhanceTimerId !== null) {
+      window.clearTimeout(this.linkAutoEnhanceTimerId);
+      this.linkAutoEnhanceTimerId = null;
+    }
+    if (this.syncLinkAttrsTimerId !== null) {
+      window.clearTimeout(this.syncLinkAttrsTimerId);
+      this.syncLinkAttrsTimerId = null;
+    }
+    if (this.syncSpaceLinkIconsTimerId !== null) {
+      window.clearTimeout(this.syncSpaceLinkIconsTimerId);
+      this.syncSpaceLinkIconsTimerId = null;
     }
     this.editor?.destroy();
     this.editor = null;
@@ -1892,8 +2289,16 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   toggleEditing(): void {
     if (!this.canEdit()) return;
+    const sourceDoc = this.pendingDoc ?? this.editor?.getJSON() ?? this.editorDoc ?? emptyDoc();
+    this.readonlyDocBeforeEdit = sourceDoc;
+    const editableDoc = this.convertMarkupLinksInDoc(sourceDoc);
+    this.editorDoc = editableDoc;
+    this.pendingDoc = editableDoc;
     this.setEditingState(true);
     this.saveError.set(null);
+    if (this.editorHost) {
+      this.requestMountEditor(editableDoc, false);
+    }
     this.closeToolbarMenus();
   }
 
@@ -1904,9 +2309,12 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     this.hasUnsavedChanges.set(false);
     this.saveError.set(null);
     this.unsavedChanges.clearDraft(this.note().id);
-    if (this.pendingDoc && this.editorHost) {
-      this.editorDoc = this.pendingDoc;
-      this.requestMountEditor(this.pendingDoc, false);
+    const readonlyDoc = this.readonlyDocBeforeEdit ?? this.pendingDoc;
+    this.readonlyDocBeforeEdit = null;
+    if (readonlyDoc && this.editorHost) {
+      this.pendingDoc = readonlyDoc;
+      this.editorDoc = readonlyDoc;
+      this.requestMountEditor(readonlyDoc, false);
     }
   }
 
@@ -1937,11 +2345,10 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   @HostListener('document:pointerdown', ['$event'])
   onDocumentPointerDown(event: PointerEvent): void {
-    if (!this.hasOpenToolbarMenu()) return;
     const target = event.target;
     if (!(target instanceof Node)) return;
-    if (this.hostElement.nativeElement.contains(target)) return;
-    this.closeToolbarMenus();
+    if (this.shouldKeepOverlayOpenForTarget(target)) return;
+    this.dismissTransientOverlays();
   }
 
   private activeEditor(): Editor | null {
@@ -1960,6 +2367,11 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       this.toolbarSelection = null;
     }
     // Keep ProseMirror selection visible while toolbar menus are clicked.
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  preserveLinkMenuSelection(event: MouseEvent | PointerEvent): void {
     event.preventDefault();
     event.stopPropagation();
   }
@@ -1996,6 +2408,9 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     queueMicrotask(() => {
       this.selectionVersionQueued = false;
       this.selectionVersion.update((value) => value + 1);
+      if (this.editorEnabled()) {
+        this.syncEditModeFocusedLinkMenu();
+      }
     });
   }
 
@@ -2283,6 +2698,16 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     this.restoreSelectionAfterToolbarAction();
   }
 
+  onToolbarClick(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    // Dropdown trigger buttons manage their own open/close state.
+    if (target.closest('.toolbar-anchor > button')) return;
+    // Let popover controls finish their own click actions.
+    if (target.closest('.toolbar-popover')) return;
+    this.dismissTransientOverlays();
+  }
+
   isMarkActive(mark: string): boolean {
     this.selectionVersion();
     return this.editor?.isActive(mark) ?? false;
@@ -2541,50 +2966,785 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   }
 
   insertLink(): void {
-    const editor = this.activeEditor();
+    const editor = this.focusEditorForToolbarAction(false);
     if (!editor) return;
-    const currentHref = editor.getAttributes('link')['href'];
-    const href = window.prompt(
-      'Link URL',
-      typeof currentHref === 'string' ? currentHref : 'https://'
-    );
-    if (!href?.trim()) return;
-    const activeEditor = this.activeEditor();
-    if (!activeEditor) return;
-    if (activeEditor.state.selection.empty) {
-      const label = window.prompt('Link label', href.trim())?.trim();
-      if (!label) return;
-      activeEditor
+    const { from, to, empty } = editor.state.selection;
+    const selectedText = empty ? '' : editor.state.doc.textBetween(from, to, ' ').trim();
+    const position = this.getDefaultLinkEditorPosition();
+    this.linkEditorState.set({
+      mode: 'insert',
+      from,
+      to,
+      empty,
+      href: '',
+      label: selectedText,
+      left: position.left,
+      top: position.top,
+      error: null,
+    });
+    this.saveError.set(null);
+    this.closeToolbarMenus();
+  }
+
+  openFocusedLink(): void {
+    const focused = this.focusedLinkMenu();
+    if (!focused) return;
+    this.cancelLinkMenuHideTimer();
+    const internalRoute = this.resolveInternalRouteHref(focused.href);
+    if (internalRoute) {
+      void this.router.navigateByUrl(internalRoute);
+      return;
+    }
+    window.open(focused.href, '_blank', 'noopener,noreferrer');
+  }
+
+  private resolveInternalRouteHref(rawHref: string): string | null {
+    const normalized = this.asAbsoluteUrl(rawHref);
+    const hash = normalized.hash.startsWith('#') ? normalized.hash.slice(1) : normalized.hash;
+    if (normalized.origin === window.location.origin && normalized.pathname.startsWith('/home')) {
+      return `${normalized.pathname}${normalized.search}${normalized.hash}`;
+    }
+    if (hash.startsWith('/home')) {
+      return hash;
+    }
+    if (rawHref.startsWith('/home')) {
+      return rawHref;
+    }
+    const noteId = this.extractNoteIdFromHref(rawHref);
+    if (noteId) {
+      return `/home/notes/${noteId}`;
+    }
+    const spaceId = this.extractSpaceIdFromHref(rawHref);
+    if (spaceId !== null) {
+      return `/home?space=${this.buildSpaceTokenById(spaceId)}`;
+    }
+    return null;
+  }
+
+  copyFocusedLink(): void {
+    const focused = this.focusedLinkMenu();
+    if (!focused) return;
+    this.cancelLinkMenuHideTimer();
+    void this.copyResolvedFocusedLink(focused);
+  }
+
+  private async copyResolvedFocusedLink(focused: FocusedLinkState): Promise<void> {
+    if (focused.kind === 'note') {
+      const noteId = this.extractNoteIdFromHref(focused.href);
+      if (noteId) {
+        const presentation = await this.resolveInternalLinkPresentation(`/home/notes/${noteId}`);
+        if (presentation) {
+          await navigator.clipboard.writeText(this.asAbsoluteUrl(presentation.href).toString());
+          return;
+        }
+      }
+    }
+    if (focused.kind === 'space') {
+      const spaceId = this.extractSpaceIdFromHref(focused.href);
+      if (spaceId !== null) {
+        const spaceToken = this.buildSpaceTokenById(spaceId);
+        await navigator.clipboard.writeText(this.asAbsoluteUrl(`/home?space=${spaceToken}`).toString());
+        return;
+      }
+    }
+    await navigator.clipboard.writeText(this.asAbsoluteUrl(focused.href).toString());
+  }
+
+  async toggleFocusedLinkView(): Promise<void> {
+    const editor = this.activeEditor();
+    const focused = this.focusedLinkMenu();
+    if (!editor || !focused) return;
+    if (focused.kind === 'external') {
+      return;
+    }
+    const nextView: LinkViewMode = focused.view === 'text' ? 'inline' : 'text';
+    const presentation =
+      nextView === 'inline'
+        ? await this.resolveInternalLinkPresentation(focused.href)
+        : { href: focused.href, label: focused.href };
+    if (!presentation) return;
+    editor
+      .chain()
+      .focus()
+      .setTextSelection({ from: focused.from, to: focused.to })
+      .insertContent({
+        type: 'text',
+        text: presentation.label,
+        marks: [{ type: 'link', attrs: this.buildLinkAttrs(presentation.href, nextView) }],
+      })
+      .run();
+    this.cancelLinkMenuHideTimer();
+    this.syncEditModeFocusedLinkMenu();
+  }
+
+  editFocusedLink(): void {
+    const focused = this.focusedLinkMenu();
+    if (!focused) return;
+    this.cancelLinkMenuHideTimer();
+    this.linkEditorState.set({
+      mode: 'edit',
+      from: focused.from,
+      to: focused.to,
+      empty: false,
+      href: focused.href,
+      label: focused.label,
+      left: Math.min(window.innerWidth - 360, Math.max(12, focused.left)),
+      top: Math.min(window.innerHeight - 220, Math.max(12, focused.top + 8)),
+      error: null,
+    });
+    this.hideFocusedLinkMenu(true);
+    this.saveError.set(null);
+  }
+
+  onLinkEditorHrefInput(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    this.linkEditorState.update((state) => (state ? { ...state, href: target.value, error: null } : state));
+  }
+
+  onLinkEditorLabelInput(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    this.linkEditorState.update((state) => (state ? { ...state, label: target.value, error: null } : state));
+  }
+
+  cancelLinkEditor(): void {
+    this.linkEditorState.set(null);
+  }
+
+  submitLinkEditor(): void {
+    const draft = this.linkEditorState();
+    const editor = this.activeEditor();
+    if (!draft || !editor) {
+      this.cancelLinkEditor();
+      return;
+    }
+    const normalizedHref = this.normalizeLinkHref(draft.href);
+    if (!normalizedHref) {
+      this.linkEditorState.update((state) =>
+        state ? { ...state, error: 'Please enter a valid http(s) URL, relative path, or #anchor.' } : state
+      );
+      return;
+    }
+
+    this.saveError.set(null);
+    const typedLabel = draft.label.trim();
+    const fallbackLabel = this.fallbackLinkLabel(normalizedHref);
+    const nextLabel = typedLabel || (draft.mode === 'edit' ? fallbackLabel : draft.empty ? fallbackLabel : '');
+    const viewLabel = nextLabel || typedLabel || fallbackLabel;
+    const attrs = this.buildLinkAttrs(normalizedHref, this.resolveLinkViewMode(normalizedHref, viewLabel));
+
+    if (!draft.empty || draft.mode === 'edit') {
+      const selectedText = editor.state.doc.textBetween(draft.from, draft.to, ' ').trim();
+      const replaceText = typedLabel.length > 0 && typedLabel !== selectedText;
+      const chain = editor.chain().focus().setTextSelection({ from: draft.from, to: draft.to });
+      if (replaceText || draft.mode === 'edit') {
+        chain
+          .insertContent({
+            type: 'text',
+            text: nextLabel || selectedText || fallbackLabel,
+            marks: [{ type: 'link', attrs }],
+          })
+          .run();
+      } else {
+        chain.setLink(attrs).run();
+      }
+    } else {
+      const label = nextLabel || fallbackLabel;
+      editor
         .chain()
         .focus()
+        .setTextSelection({ from: draft.from, to: draft.to })
         .insertContent({
           type: 'text',
           text: label,
-          marks: [
-            {
-              type: 'link',
-              attrs: {
-                href: href.trim(),
-                target: '_blank',
-                rel: 'noopener noreferrer nofollow',
-              },
-            },
-          ],
-        })
-        .run();
-    } else {
-      activeEditor
-        .chain()
-        .focus()
-        .extendMarkRange('link')
-        .setLink({
-          href: href.trim(),
-          target: '_blank',
-          rel: 'noopener noreferrer nofollow',
+          marks: [{ type: 'link', attrs }],
         })
         .run();
     }
-    this.closeToolbarMenus();
+
+    this.cancelLinkEditor();
+    this.queueSelectionVersionUpdate();
+  }
+
+  removeFocusedLink(): void {
+    const editor = this.activeEditor();
+    const focused = this.focusedLinkMenu();
+    if (!editor || !focused) return;
+    editor.chain().focus().setTextSelection({ from: focused.from, to: focused.to }).unsetLink().run();
+    this.hideFocusedLinkMenu(true);
+  }
+
+  onLinkMenuMouseEnter(): void {
+    this.linkMenuHovered = true;
+    this.cancelLinkMenuHideTimer();
+  }
+
+  onLinkMenuMouseLeave(): void {
+    this.linkMenuHovered = false;
+    if (!this.editorEnabled()) {
+      this.scheduleLinkMenuHide();
+    }
+  }
+
+  private hideFocusedLinkMenu(immediate = false): void {
+    if (!immediate && this.linkMenuHovered) return;
+    this.cancelLinkMenuHideTimer();
+    this.linkMenuHovered = false;
+    this.focusedLinkMenu.set(null);
+  }
+
+  private scheduleLinkMenuHide(delayMs = 500): void {
+    this.cancelLinkMenuHideTimer();
+    this.linkMenuHideTimeoutId = window.setTimeout(() => {
+      this.linkMenuHideTimeoutId = null;
+      if (this.linkMenuHovered) return;
+      this.focusedLinkMenu.set(null);
+    }, delayMs);
+  }
+
+  private cancelLinkMenuHideTimer(): void {
+    if (this.linkMenuHideTimeoutId === null) return;
+    window.clearTimeout(this.linkMenuHideTimeoutId);
+    this.linkMenuHideTimeoutId = null;
+  }
+
+  private closestLinkAnchor(node: Node | null): HTMLAnchorElement | null {
+    if (!node) return null;
+    if (node instanceof HTMLAnchorElement) return node;
+    if (node instanceof HTMLElement) {
+      return node.closest('a[href]');
+    }
+    return node.parentElement?.closest('a[href]') ?? null;
+  }
+
+  private buildFocusedLinkState(anchor: HTMLAnchorElement, anchorPoint?: { left: number; top: number }): FocusedLinkState | null {
+    if (!this.editor) return null;
+    try {
+      const from = this.editor.view.posAtDOM(anchor, 0);
+      const to = this.editor.view.posAtDOM(anchor, anchor.childNodes.length);
+      const href = anchor.getAttribute('href')?.trim() ?? '';
+      if (!href) return null;
+      const label = anchor.textContent?.trim() || href;
+      const rect = anchor.getBoundingClientRect();
+      const position = anchorPoint ?? {
+        left: Math.min(window.innerWidth - 140, Math.max(12, rect.left)),
+        top: Math.min(window.innerHeight - 64, Math.max(12, rect.bottom + 8)),
+      };
+      return {
+        from: Math.min(from, to),
+        to: Math.max(from, to),
+        href,
+        label,
+        kind: this.inferLinkKind(href),
+        view: this.parseLinkView(anchor, href, label),
+        ...position,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private parseLinkView(anchor: HTMLAnchorElement, href: string, label: string): LinkViewMode {
+    const raw = anchor.getAttribute('data-app-link-view');
+    if (raw === 'inline' || raw === 'text') {
+      return raw;
+    }
+    return this.resolveLinkViewMode(href, label);
+  }
+
+  private syncEditModeFocusedLinkMenu(): void {
+    if (!this.editor || !this.editorEnabled()) return;
+    const { from, to } = this.editor.state.selection;
+    const fromNode = this.editor.view.domAtPos(from).node;
+    const toNode = this.editor.view.domAtPos(Math.max(from, to - 1)).node;
+    const anchor = this.closestLinkAnchor(fromNode) ?? this.closestLinkAnchor(toNode);
+    if (!anchor) {
+      this.hideFocusedLinkMenu(true);
+      return;
+    }
+    this.openFocusedLinkMenuFromAnchor(anchor);
+  }
+
+  private queueAutoEnhanceInternalLinks(): void {
+    if (!this.editorEnabled() || !this.editor || this.suppressUpdates) return;
+    if (this.linkAutoEnhanceInFlight) return;
+    if (this.linkAutoEnhanceTimerId !== null) return;
+    this.linkAutoEnhanceTimerId = window.setTimeout(() => {
+      this.linkAutoEnhanceTimerId = null;
+      void this.autoEnhanceInternalLinks();
+    }, 120);
+  }
+
+  private async autoEnhanceInternalLinks(): Promise<void> {
+    if (!this.editor || !this.editorEnabled() || this.suppressUpdates || this.linkAutoEnhanceInFlight) return;
+    this.linkAutoEnhanceInFlight = true;
+    try {
+      let changed = true;
+      let iterations = 0;
+      while (changed && iterations < 3) {
+        changed = await this.enhanceOneInternalLink();
+        iterations += 1;
+      }
+    } finally {
+      this.linkAutoEnhanceInFlight = false;
+    }
+  }
+
+  private queueSyncSpaceLinkIcons(): void {
+    if (!this.editor || this.suppressUpdates) return;
+    if (this.syncSpaceLinkIconsTimerId !== null) return;
+    this.syncSpaceLinkIconsTimerId = window.setTimeout(() => {
+      this.syncSpaceLinkIconsTimerId = null;
+      void this.syncSpaceLinkIcons();
+    }, 140);
+  }
+
+  private queueSyncLinkAttrs(): void {
+    if (!this.editor || this.suppressUpdates) return;
+    if (this.syncLinkAttrsTimerId !== null) return;
+    this.syncLinkAttrsTimerId = window.setTimeout(() => {
+      this.syncLinkAttrsTimerId = null;
+      this.syncLinkAttrs();
+    }, 100);
+  }
+
+  private syncLinkAttrs(): void {
+    if (!this.editor || this.suppressUpdates) return;
+    const state = this.editor.state;
+    const tr = state.tr;
+    let changed = false;
+    state.doc.descendants((node, position) => {
+      if (!node.isText || typeof node.text !== 'string') return;
+      const linkMark = node.marks.find((mark) => mark.type.name === 'link');
+      if (!linkMark) return;
+      const rawHref = typeof linkMark.attrs?.['href'] === 'string' ? String(linkMark.attrs['href']).trim() : '';
+      if (!rawHref) return;
+      const label = node.text;
+      const desiredAttrs = this.buildLinkAttrs(rawHref, this.resolveLinkViewMode(rawHref, label));
+      const currentKind = String(linkMark.attrs?.['data-app-link-kind'] ?? '');
+      const currentView = String(linkMark.attrs?.['data-app-link-view'] ?? '');
+      const currentTarget = String(linkMark.attrs?.['target'] ?? '');
+      const currentRel = String(linkMark.attrs?.['rel'] ?? '');
+      const shouldUpdate =
+        currentKind !== desiredAttrs['data-app-link-kind'] ||
+        currentView !== desiredAttrs['data-app-link-view'] ||
+        currentTarget !== desiredAttrs.target ||
+        currentRel !== desiredAttrs.rel;
+      if (!shouldUpdate) return;
+      const from = position;
+      const to = position + node.nodeSize;
+      tr.removeMark(from, to, linkMark.type);
+      tr.addMark(from, to, linkMark.type.create({ ...linkMark.attrs, ...desiredAttrs }));
+      changed = true;
+    });
+    if (changed) {
+      this.editor.view.dispatch(tr);
+    }
+  }
+
+  private async syncSpaceLinkIcons(): Promise<void> {
+    if (!this.editor) return;
+    if (!this.spacesCache) {
+      await this.getSpacesCached();
+    }
+    const root = this.editor.view.dom;
+    if (!(root instanceof HTMLElement)) return;
+    const anchors = root.querySelectorAll<HTMLAnchorElement>('a[data-app-link-kind="space"], a[href*="?space="]');
+    anchors.forEach((anchor) => {
+      const href = anchor.getAttribute('href')?.trim() ?? '';
+      const spaceId = this.extractSpaceIdFromHref(href);
+      if (spaceId === null) {
+        anchor.style.removeProperty('--space-link-icon-mask');
+        return;
+      }
+      const avatarKey = this.spaceAvatarKeyById.get(spaceId) ?? 1;
+      const mask = this.spaceAvatarMaskDataUrl(avatarKey);
+      anchor.style.setProperty('--space-link-icon-mask', `url("${mask}")`);
+    });
+  }
+
+  private spaceAvatarMaskDataUrl(avatarKey: number): string {
+    const path = SPACE_AVATAR_PATH_BY_KEY.get(avatarKey) ?? SPACE_AVATAR_OPTIONS[0]?.path ?? '';
+    const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 640'><path fill='black' d='${path}'/></svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
+  private async enhanceOneInternalLink(): Promise<boolean> {
+    if (!this.editor) return false;
+    const state = this.editor.state;
+    const doc = state.doc;
+    const holder: {
+      value: { from: number; to: number; text: string; href: string; originalMarks: readonly ProseMirrorMark[] } | null;
+    } = { value: null };
+
+    doc.descendants((node, position) => {
+      if (holder.value || !node.isText || typeof node.text !== 'string') return;
+      const linkMark = node.marks.find((mark) => mark.type.name === 'link');
+      if (!linkMark) return;
+      const rawHref = typeof linkMark.attrs?.['href'] === 'string' ? String(linkMark.attrs['href']).trim() : '';
+      if (!rawHref) return;
+      if (!this.isLikelyInternalHref(rawHref)) return;
+      const from = position;
+      const to = position + node.nodeSize;
+      const currentText = node.text;
+      holder.value = {
+        from,
+        to,
+        text: currentText,
+        href: rawHref,
+        originalMarks: node.marks,
+      };
+    });
+    const next = holder.value;
+    if (!next) return false;
+
+    const presentation = await this.resolveInternalLinkPresentation(next.href);
+    if (!presentation) return false;
+    const shouldSwapText = this.looksLikeUrlText(next.text, next.href);
+    const desiredText = shouldSwapText ? presentation.label : next.text;
+    const desiredHref = presentation.href;
+    if (desiredText === next.text && desiredHref === next.href) return false;
+
+    const tr = state.tr;
+    const marks = next.originalMarks.map((mark: ProseMirrorMark) =>
+      mark.type.name === 'link'
+        ? mark.type.create(this.buildLinkAttrs(desiredHref, this.resolveLinkViewMode(desiredHref, desiredText)))
+        : mark
+    );
+    tr.replaceWith(next.from, next.to, state.schema.text(desiredText, marks));
+    this.editor.view.dispatch(tr);
+    return true;
+  }
+
+  private isLikelyInternalHref(href: string): boolean {
+    const lower = href.toLowerCase();
+    return (
+      lower.includes('/home/notes/') ||
+      lower.includes('/notes/') ||
+      lower.includes('/home/spaces/') ||
+      lower.includes('/spaces/') ||
+      lower.includes('/home?space=') ||
+      lower.includes('localhost') ||
+      lower.startsWith('/home')
+    );
+  }
+
+  private looksLikeUrlText(text: string, href: string): boolean {
+    const trimmed = text.trim();
+    const normalizedHref = href.trim();
+    if (!trimmed) return true;
+    if (trimmed === normalizedHref) return true;
+    if (trimmed === decodeURIComponent(normalizedHref)) return true;
+    return /^https?:\/\//i.test(trimmed) || trimmed.startsWith('localhost');
+  }
+
+  private async resolveInternalLinkPresentation(
+    rawHref: string
+  ): Promise<{ href: string; label: string } | null> {
+    const noteId = this.extractNoteIdFromHref(rawHref);
+    if (!noteId) {
+      const spaceId = this.extractSpaceIdFromHref(rawHref);
+      if (!spaceId) return null;
+      const spaces = await this.getSpacesCached();
+      const targetSpace = spaces.find((space) => space.id === spaceId) ?? null;
+      const label = targetSpace?.name?.trim() ? targetSpace.name.trim() : `space-${spaceId}`;
+      const spaceToken = targetSpace ? buildSpaceToken(targetSpace) : this.buildSpaceTokenById(spaceId);
+      return { href: `/home?space=${spaceToken}`, label };
+    }
+
+    const note = await this.getNoteCached(noteId);
+    if (note?.is_about_note) {
+      const aboutSpace = await this.findSpaceByAboutNoteId(noteId);
+      if (aboutSpace) {
+        return {
+          href: `/home?space=${buildSpaceToken(aboutSpace)}`,
+          label: aboutSpace.name,
+        };
+      }
+    }
+
+    const label = note?.title?.trim() ? note.title.trim() : `Note ${noteId.slice(0, 8)}`;
+    const noteToken = note ? buildNoteToken(note) : `${noteId.slice(0, 8)}--${noteId}`;
+    const space = note ? await this.findSpaceForFolderId(note.folder_id) : null;
+    const query = space ? `?space=${buildSpaceToken(space)}` : '';
+    return {
+      href: `/home/notes/${noteToken}${query}`,
+      label,
+    };
+  }
+
+  private extractNoteIdFromHref(rawHref: string): string | null {
+    const normalized = this.asAbsoluteUrl(rawHref);
+    const candidates = [normalized.pathname, normalized.hash.startsWith('#') ? normalized.hash.slice(1) : normalized.hash];
+    for (const candidate of candidates) {
+      const match = candidate.match(/\/home\/notes\/([^/?#]+)/i) ?? candidate.match(/\/notes\/([^/?#]+)/i);
+      if (match?.[1]) return parseNoteIdToken(match[1]);
+    }
+    return null;
+  }
+
+  private extractSpaceIdFromHref(rawHref: string): number | null {
+    const normalized = this.asAbsoluteUrl(rawHref);
+    const spaces = this.spacesCache ?? [];
+    const direct = resolveSpaceIdToken(normalized.searchParams.get('space'), spaces);
+    if (direct !== null) return direct;
+    const pathMatch = normalized.pathname.match(/\/home\/spaces\/(\d+)(?:[/?#]|$)/i) ?? normalized.pathname.match(/\/spaces\/(\d+)(?:[/?#]|$)/i);
+    if (pathMatch?.[1]) {
+      const pathSpace = Number.parseInt(pathMatch[1], 10);
+      if (Number.isFinite(pathSpace)) return pathSpace;
+    }
+    const hash = normalized.hash.startsWith('#') ? normalized.hash.slice(1) : normalized.hash;
+    const hashUrl = hash.startsWith('/home') ? new URL(`https://local${hash}`) : null;
+    if (hashUrl) {
+      const hashSpace = resolveSpaceIdToken(hashUrl.searchParams.get('space'), spaces);
+      if (hashSpace !== null) return hashSpace;
+    }
+    return null;
+  }
+
+  private asAbsoluteUrl(rawHref: string): URL {
+    try {
+      return new URL(rawHref);
+    } catch {
+      return new URL(rawHref, window.location.origin);
+    }
+  }
+
+  private async getNoteCached(noteId: string): Promise<Note | null> {
+    if (this.noteCache.has(noteId)) return this.noteCache.get(noteId) ?? null;
+    try {
+      const note = await firstValueFrom(this.notesService.get(noteId));
+      this.noteCache.set(noteId, note);
+      return note;
+    } catch {
+      this.noteCache.set(noteId, null);
+      return null;
+    }
+  }
+
+  private async getSpacesCached(): Promise<Space[]> {
+    if (this.spacesCache) return this.spacesCache;
+    try {
+      const spaces = await firstValueFrom(this.spacesService.list());
+      this.spacesCache = spaces;
+      this.aboutSpaceByNoteId.clear();
+      this.spaceAvatarKeyById.clear();
+      for (const space of spaces) {
+        if (space.about_note_id) {
+          this.aboutSpaceByNoteId.set(space.about_note_id, space);
+        }
+        this.spaceAvatarKeyById.set(space.id, space.avatar_key ?? 1);
+      }
+      return spaces;
+    } catch {
+      this.spacesCache = [];
+      this.spaceAvatarKeyById.clear();
+      return [];
+    }
+  }
+
+  private async getFoldersCached(): Promise<Folder[]> {
+    if (this.foldersCache) return this.foldersCache;
+    try {
+      const folders = await firstValueFrom(this.foldersService.getTree());
+      this.foldersCache = folders;
+      return folders;
+    } catch {
+      this.foldersCache = [];
+      return [];
+    }
+  }
+
+  private async findSpaceForFolderId(folderId: number): Promise<Space | null> {
+    const [spaces, folders] = await Promise.all([this.getSpacesCached(), this.getFoldersCached()]);
+    const folderMap = new Map(folders.map((folder) => [folder.id, folder]));
+    let current = folderMap.get(folderId) ?? null;
+    while (current) {
+      const space = spaces.find((candidate) => candidate.root_folder_id === current!.id);
+      if (space) return space;
+      if (current.parent_id == null) return null;
+      current = folderMap.get(current.parent_id) ?? null;
+    }
+    return null;
+  }
+
+  private buildSpaceTokenById(spaceId: number): string {
+    const known = (this.spacesCache ?? []).find((space) => space.id === spaceId);
+    return known ? buildSpaceToken(known) : `space-${spaceId}--${spaceId}`;
+  }
+
+  private async findSpaceByAboutNoteId(noteId: string): Promise<Space | null> {
+    if (this.aboutSpaceByNoteId.has(noteId)) {
+      return this.aboutSpaceByNoteId.get(noteId) ?? null;
+    }
+    const spaces = await this.getSpacesCached();
+    return spaces.find((space) => space.about_note_id === noteId) ?? null;
+  }
+
+  private inferLinkKind(href: string): FocusedLinkState['kind'] {
+    if (this.extractNoteIdFromHref(href)) return 'note';
+    if (this.extractSpaceIdFromHref(href) !== null) return 'space';
+    return 'external';
+  }
+
+  private handleEditorContextMenu(event: Event): boolean {
+    if (!(event instanceof MouseEvent) || !this.editor) {
+      return false;
+    }
+    const anchor = this.closestLinkAnchor(event.target instanceof Node ? event.target : null);
+    if (!anchor) return false;
+    const href = anchor.getAttribute('href')?.trim();
+    if (!href) return false;
+    event.preventDefault();
+    return this.openFocusedLinkMenuFromAnchor(anchor, {
+      left: Math.min(window.innerWidth - 220, Math.max(12, event.clientX + 10)),
+      top: Math.min(window.innerHeight - 64, Math.max(12, event.clientY + 10)),
+    });
+  }
+
+  private openFocusedLinkMenuFromAnchor(anchor: HTMLAnchorElement, anchorPoint?: { left: number; top: number }): boolean {
+    this.cancelLinkMenuHideTimer();
+    const nextMenu = this.buildFocusedLinkState(anchor, anchorPoint);
+    if (!nextMenu) {
+      this.hideFocusedLinkMenu(true);
+      return false;
+    }
+    this.focusedLinkMenu.set(nextMenu);
+    return true;
+  }
+
+  private handleEditorMouseMove(event: Event): boolean {
+    if (!(event instanceof MouseEvent) || this.editorEnabled()) {
+      return false;
+    }
+    const anchor = this.closestLinkAnchor(event.target instanceof Node ? event.target : null);
+    if (!anchor) {
+      if (!this.linkMenuHovered) {
+        this.scheduleLinkMenuHide();
+      }
+      return false;
+    }
+    this.linkMenuHovered = false;
+    return this.openFocusedLinkMenuFromAnchor(anchor);
+  }
+
+  private handleEditorMouseLeave(_event: Event): boolean {
+    if (!this.editorEnabled()) {
+      if (!this.linkMenuHovered) {
+        this.scheduleLinkMenuHide();
+      }
+    }
+    return false;
+  }
+
+  private normalizeLinkHref(rawHref: string): string | null {
+    const trimmed = rawHref.trim();
+    if (!trimmed) return null;
+    if (trimmed.startsWith('/') || trimmed.startsWith('#')) {
+      return trimmed;
+    }
+    const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      const parsed = new URL(withProtocol);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  private getDefaultLinkEditorPosition(): { left: number; top: number } {
+    const rect = this.hostElement.nativeElement.getBoundingClientRect();
+    return {
+      left: Math.min(window.innerWidth - 360, Math.max(12, rect.left + 32)),
+      top: Math.min(window.innerHeight - 220, Math.max(12, rect.top + 110)),
+    };
+  }
+
+  private fallbackLinkLabel(href: string): string {
+    if (!href.startsWith('http')) return href;
+    try {
+      return new URL(href).hostname;
+    } catch {
+      return href;
+    }
+  }
+
+  private convertMarkupLinksInDoc(doc: JSONContent): JSONContent {
+    const convertNode = (node: JSONContent): JSONContent[] => {
+      if (node.type === 'codeBlock') return [node];
+      if (node.type === 'text' && typeof node.text === 'string') {
+        const marks = node.marks ?? [];
+        if (marks.some((mark) => mark.type === 'code' || mark.type === 'link')) {
+          return [node];
+        }
+        const tokens = splitMarkupLinkText(node.text);
+        if (!tokens.some((token) => token.kind === 'link')) {
+          return [node];
+        }
+        const nonLinkMarks = marks.filter((mark) => mark.type !== 'link');
+        const transformed: JSONContent[] = [];
+        for (const token of tokens) {
+          if (token.kind === 'text') {
+            if (!token.value) continue;
+            transformed.push({
+              type: 'text',
+              text: token.value,
+              ...(nonLinkMarks.length ? { marks: nonLinkMarks } : {}),
+            });
+            continue;
+          }
+          const label = token.value.trim();
+          const normalizedHref = this.normalizeLinkHref(token.href ?? '');
+          if (!label || !normalizedHref) {
+            transformed.push({
+              type: 'text',
+              text: `[${token.value} | ${token.href ?? ''}]`,
+              ...(marks.length ? { marks } : {}),
+            });
+            continue;
+          }
+          transformed.push({
+            type: 'text',
+            text: label,
+            marks: [
+              ...nonLinkMarks,
+              { type: 'link', attrs: this.buildLinkAttrs(normalizedHref, this.resolveLinkViewMode(normalizedHref, label)) },
+            ],
+          });
+        }
+        return transformed.length ? transformed : [node];
+      }
+      const content = node.content ?? [];
+      if (!content.length) return [node];
+      const nextContent = content.flatMap((child) => convertNode(child));
+      return [{ ...node, content: nextContent }];
+    };
+    return convertNode(doc)[0] ?? doc;
+  }
+
+  private resolveLinkViewMode(href: string, label: string): LinkViewMode {
+    if (this.inferLinkKind(href) === 'external') return 'text';
+    return this.looksLikeUrlText(label, href) ? 'text' : 'inline';
+  }
+
+  private buildLinkAttrs(href: string, view: LinkViewMode = 'text'): {
+    href: string;
+    target: string;
+    rel: string;
+    'data-app-link-kind': FocusedLinkState['kind'];
+    'data-app-link-view': LinkViewMode;
+  } {
+    const kind = this.inferLinkKind(href);
+    const isInternal = kind !== 'external';
+    return {
+      href,
+      target: isInternal ? '_self' : '_blank',
+      rel: isInternal ? 'noopener noreferrer' : 'noopener noreferrer nofollow',
+      'data-app-link-kind': kind,
+      'data-app-link-view': view,
+    };
   }
 
   insertDatabaseSchema(): void {
@@ -2687,15 +3847,17 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   private mountEditor(doc: JSONContent, preserveDirty = false): void {
     const host = this.editorHost?.nativeElement;
     if (!host) return;
+    this.focusedLinkMenu.set(null);
     if (this.editor) {
       this.editor.destroy();
       this.editor = null;
     }
     this.suppressUpdates = true;
+    const initialContent = this.convertMarkupLinksInDoc(doc);
     this.editor = new Editor({
       element: host,
       editable: this.editorEnabled(),
-      content: doc,
+      content: initialContent,
       extensions: [
         StarterKit.configure({
           codeBlock: false,
@@ -2710,9 +3872,10 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
           exitOnArrowDown: true,
         }),
         Underline,
-        Link.configure({
+        AppLink.configure({
           openOnClick: false,
-          autolink: false,
+          autolink: true,
+          linkOnPaste: true,
           defaultProtocol: 'https',
         }),
         Subscript,
@@ -2750,13 +3913,20 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       ],
       editorProps: {
         attributes: {
-          class: `unified-note-editor${this.editorEnabled() ? '' : ' unified-note-editor--readonly'}`,
+          class: 'unified-note-editor',
         },
         handleKeyDown: (_view, event) => this.handleEditorShortcuts(event),
+        handleDOMEvents: {
+          mousemove: (_view, event) => this.handleEditorMouseMove(event),
+          mouseleave: (_view, event) => this.handleEditorMouseLeave(event),
+          contextmenu: (_view, event) => this.handleEditorContextMenu(event),
+        },
       },
       onUpdate: () => {
         this.refreshUnsavedState();
         this.queueSelectionVersionUpdate();
+        this.queueSyncLinkAttrs();
+        this.queueSyncSpaceLinkIcons();
       },
       onSelectionUpdate: () => {
         this.queueSelectionVersionUpdate();
@@ -2768,6 +3938,8 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     queueMicrotask(() => {
       this.suppressUpdates = false;
       this.syncEditorModeClass();
+      this.queueSyncLinkAttrs();
+      this.queueSyncSpaceLinkIcons();
       this.hasUnsavedChanges.set(preserveDirty);
       this.saveError.set(null);
       this.queueSelectionVersionUpdate();
@@ -2784,7 +3956,6 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     const root = this.editor?.view.dom;
     if (!(root instanceof HTMLElement)) return;
     root.classList.add('unified-note-editor');
-    root.classList.toggle('unified-note-editor--readonly', !this.editorEnabled());
     root.style.paddingTop = '0';
   }
 
@@ -2860,7 +4031,8 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     if (!this.editor) return Promise.resolve(false);
     if (this.currentPersistPromise) return this.currentPersistPromise;
     const note = this.note();
-    const nextDoc = this.editor.getJSON();
+    const rawDoc = this.editor.getJSON();
+    const nextDoc = this.convertMarkupLinksInDoc(rawDoc);
     const payload = {
       doc: nextDoc,
     };
@@ -2885,6 +4057,7 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
             next: () => {
               this.pendingDoc = nextDoc;
               this.editorDoc = nextDoc;
+              this.readonlyDocBeforeEdit = null;
               this.legacyBlockIds = [];
               this.hasUnsavedChanges.set(false);
               this.unsavedChanges.clearDraft(note.id);
@@ -2936,5 +4109,31 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     this.tableMenuOpen.set(false);
     this.plusMenuOpen.set(false);
     this.tablePreview.set(null);
+  }
+
+  private dismissTransientOverlays(): void {
+    if (this.activeUsersOpen()) {
+      this.activeUsersOpen.set(false);
+    }
+    if (this.hasOpenToolbarMenu()) {
+      this.closeToolbarMenus();
+    }
+    if (this.focusedLinkMenu()) {
+      this.hideFocusedLinkMenu(true);
+    }
+    if (this.linkEditorState()) {
+      this.cancelLinkEditor();
+    }
+  }
+
+  private shouldKeepOverlayOpenForTarget(target: Node): boolean {
+    if (!(target instanceof Element)) return false;
+    return (
+      target.closest('.toolbar-popover') !== null ||
+      target.closest('.link-focus-menu') !== null ||
+      target.closest('.link-editor-popover') !== null ||
+      target.closest('.note-active-users') !== null ||
+      target.closest('.note-active-users-popover') !== null
+    );
   }
 }
