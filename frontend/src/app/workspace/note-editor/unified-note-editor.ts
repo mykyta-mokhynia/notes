@@ -130,6 +130,7 @@ const AUTOPAIR_BRACKETS: Record<string, string> = {
   '[': ']',
   '{': '}',
 };
+const DB_SCHEMA_DRAFT_STORAGE_PREFIX = 'notes:db-schema-editor:draft:v1';
 
 interface NoteActiveUser {
   id: number;
@@ -219,6 +220,8 @@ interface DatabaseSchemaEditorState {
   mode: DatabaseSchemaEditorMode;
   position: number | null;
   value: DatabaseSchemaEditorValue;
+  savedValue: DatabaseSchemaEditorValue;
+  draftStorageKey: string;
   error: string | null;
 }
 
@@ -230,6 +233,11 @@ interface SelectedDatabaseSchemaState {
 interface DatabaseSchemaNodeOpenDetail {
   position: number | null;
   mode: 'view' | 'edit';
+}
+
+interface DatabaseSchemaDraftChangedEventDetail {
+  key: string;
+  hasDraft: boolean;
 }
 
 interface LinkMenuIcons {
@@ -565,6 +573,36 @@ function schemaFieldViewText(
   return `${field.name}: ${field.type}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
 }
 
+function hashString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function currentNoteIdFromLocation(): string | null {
+  const match = window.location.pathname.match(/\/home\/notes\/([^/?#]+)/);
+  return parseNoteIdToken(match?.[1] ?? null);
+}
+
+function databaseSchemaDraftStorageKeyForNote(noteId: string | null, savedValue: DatabaseSchemaEditorValue): string | null {
+  if (!noteId) return null;
+  const payload = JSON.stringify(toDatabaseSchemaNodeAttrs(savedValue));
+  return `${DB_SCHEMA_DRAFT_STORAGE_PREFIX}:${noteId}:${hashString(payload)}`;
+}
+
+function readLocalDatabaseSchemaDraftState(savedValue: DatabaseSchemaEditorValue): { key: string | null; hasDraft: boolean } {
+  const key = databaseSchemaDraftStorageKeyForNote(currentNoteIdFromLocation(), savedValue);
+  if (!key) return { key: null, hasDraft: false };
+  try {
+    return { key, hasDraft: window.localStorage.getItem(key) !== null };
+  } catch {
+    return { key, hasDraft: false };
+  }
+}
+
 const DatabaseSchemaNode = TiptapNode.create({
   name: DATABASE_SCHEMA_NODE,
   group: 'block',
@@ -674,6 +712,12 @@ const DatabaseSchemaNode = TiptapNode.create({
 
       const title = document.createElement('div');
       title.className = 'database-schema-card__title';
+      const draftBadge = document.createElement('span');
+      draftBadge.className = 'database-schema-card__draft-badge';
+      draftBadge.textContent = 'Local draft';
+      draftBadge.hidden = true;
+      const headerRow = document.createElement('div');
+      headerRow.className = 'database-schema-card__header';
 
       const canvas = document.createElement('div');
       canvas.className = 'database-schema-card__canvas';
@@ -698,7 +742,8 @@ const DatabaseSchemaNode = TiptapNode.create({
       viewport.append(relationsLayer, entitiesLayer);
       frame.append(viewport, panSurface, openEditorButton);
       canvas.append(frame);
-      wrapper.append(title, canvas);
+      headerRow.append(title, draftBadge);
+      wrapper.append(headerRow, canvas);
       wrapper.setAttribute('draggable', 'false');
       wrapper.addEventListener('dragstart', (event) => {
         event.preventDefault();
@@ -713,6 +758,7 @@ const DatabaseSchemaNode = TiptapNode.create({
       let panY = 0;
       let zoom = 1;
       const arrowMarkerId = `schemaCardArrow_${Math.random().toString(36).slice(2, 10)}`;
+      let currentDraftStorageKey: string | null = null;
       let panState: { pointerId: number; startX: number; startY: number; originX: number; originY: number } | null = null;
 
       const nodePosition = (): number | null => {
@@ -1331,10 +1377,21 @@ const DatabaseSchemaNode = TiptapNode.create({
       const applyNodeState = (nextNode: typeof node): void => {
         currentNode = nextNode;
         const normalized = normalizeDatabaseSchemaAttrs(nextNode.attrs as DatabaseSchemaAttrs);
+        const localDraftState = readLocalDatabaseSchemaDraftState(normalized);
+        currentDraftStorageKey = localDraftState.key;
+        draftBadge.hidden = !localDraftState.hasDraft;
         title.textContent = normalized.title;
         openEditorButton.disabled = !editor.isEditable;
         openEditorButton.title = editor.isEditable ? 'Расширить схему' : 'Откройте note в режиме редактирования';
         renderEntities(normalized);
+      };
+
+      const onDraftStorageChanged = (event: Event): void => {
+        if (!(event instanceof CustomEvent)) return;
+        const detail = event.detail as DatabaseSchemaDraftChangedEventDetail | null;
+        if (!detail || typeof detail.key !== 'string' || typeof detail.hasDraft !== 'boolean') return;
+        if (!currentDraftStorageKey || detail.key !== currentDraftStorageKey) return;
+        draftBadge.hidden = !detail.hasDraft;
       };
 
       const onPointerMove = (event: PointerEvent): void => {
@@ -1373,6 +1430,7 @@ const DatabaseSchemaNode = TiptapNode.create({
       panSurface.addEventListener('pointermove', onPointerMove);
       panSurface.addEventListener('pointerup', onPointerUp);
       panSurface.addEventListener('pointercancel', onPointerUp);
+      window.addEventListener('notes-db-schema-draft-changed', onDraftStorageChanged as EventListener);
 
       frame.addEventListener('wheel', (event) => {
         event.preventDefault();
@@ -1404,6 +1462,7 @@ const DatabaseSchemaNode = TiptapNode.create({
           panSurface.removeEventListener('pointermove', onPointerMove);
           panSurface.removeEventListener('pointerup', onPointerUp);
           panSurface.removeEventListener('pointercancel', onPointerUp);
+          window.removeEventListener('notes-db-schema-draft-changed', onDraftStorageChanged as EventListener);
         },
       };
     };
@@ -1736,7 +1795,9 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
             @if (statusMessage(); as message) {
               <span
                 class="note-updated"
-                [class.note-updated--warning]="hasUnsavedChanges()"
+                [class.note-updated--warning]="
+                  hasUnsavedChanges() || hasSchemaLocalDrafts() || hasOpenSchemaEditorUnsavedChanges()
+                "
                 [class.note-updated--error]="!!saveError()"
               >
                 {{ message }}
@@ -2423,6 +2484,9 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
           <app-database-schema-editor
             [visible]="true"
             [value]="schemaState.value"
+            [savedValue]="schemaState.savedValue"
+            [draftStorageKey]="schemaState.draftStorageKey"
+            (unsavedChange)="onDatabaseSchemaEditorUnsavedChange($event)"
             (cancel)="cancelDatabaseSchemaEditor()"
             (apply)="submitDatabaseSchemaEditor($event)"
           />
@@ -2880,6 +2944,8 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly isEditing = signal(false);
   readonly isSaving = signal(false);
   readonly hasUnsavedChanges = signal(false);
+  readonly hasSchemaLocalDrafts = signal(false);
+  readonly hasOpenSchemaEditorUnsavedChanges = signal(false);
   readonly saveError = signal<string | null>(null);
   readonly activeUsersOpen = signal(false);
   readonly headingMenuOpen = signal(false);
@@ -2976,6 +3042,10 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
         saving: this.isSaving(),
         error: this.saveError(),
       });
+    });
+
+    effect(() => {
+      this.refreshSchemaLocalDraftStatus(this.note().id);
     });
 
     effect(() => {
@@ -3113,9 +3183,30 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   statusMessage(): string {
     if (this.saveError()) return this.saveError() ?? '';
     if (this.isSaving()) return 'Saving changes...';
-    if (this.hasUnsavedChanges()) return 'You have unsaved changes';
+    if (this.hasUnsavedChanges() || this.hasSchemaLocalDrafts() || this.hasOpenSchemaEditorUnsavedChanges()) {
+      return 'You have unsaved changes';
+    }
     const formatted = this.formattedUpdatedAt();
     return formatted ? `Updated ${formatted}` : '';
+  }
+
+  onDatabaseSchemaEditorUnsavedChange(hasUnsaved: boolean): void {
+    this.hasOpenSchemaEditorUnsavedChanges.set(!!hasUnsaved);
+  }
+
+  @HostListener('window:notes-db-schema-draft-changed', ['$event'])
+  onDatabaseSchemaDraftChanged(event: Event): void {
+    if (!(event instanceof CustomEvent)) return;
+    const detail = event.detail as DatabaseSchemaDraftChangedEventDetail | null;
+    if (!detail || typeof detail.key !== 'string' || typeof detail.hasDraft !== 'boolean') return;
+    const noteId = this.note().id;
+    const prefix = `${DB_SCHEMA_DRAFT_STORAGE_PREFIX}:${noteId}:`;
+    if (!detail.key.startsWith(prefix)) return;
+    if (detail.hasDraft) {
+      this.hasSchemaLocalDrafts.set(true);
+      return;
+    }
+    this.refreshSchemaLocalDraftStatus(noteId);
   }
 
   toggleEditing(): void {
@@ -3201,10 +3292,13 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     }
     const selected = this.selectedDatabaseSchemaState(this.editor);
     if (!selected) return;
+    const storageKey = this.databaseSchemaDraftStorageKey(selected.value);
     this.databaseSchemaEditorState.set({
       mode: 'edit',
       position: selected.position,
       value: selected.value,
+      savedValue: selected.value,
+      draftStorageKey: storageKey,
       error: null,
     });
     this.closeToolbarMenus();
@@ -4634,10 +4728,13 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     const editor = this.activeEditor();
     if (!editor) return;
     const selected = this.selectedDatabaseSchemaState(editor);
+    const savedValue = selected?.value ?? createDefaultDatabaseSchemaValue();
     this.databaseSchemaEditorState.set({
       mode: selected ? 'edit' : 'insert',
       position: selected?.position ?? null,
-      value: selected?.value ?? createDefaultDatabaseSchemaValue(),
+      value: savedValue,
+      savedValue,
+      draftStorageKey: this.databaseSchemaDraftStorageKey(savedValue),
       error: null,
     });
     this.plusMenuOpen.set(false);
@@ -4646,6 +4743,7 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
   cancelDatabaseSchemaEditor(): void {
     this.databaseSchemaEditorState.set(null);
+    this.hasOpenSchemaEditorUnsavedChanges.set(false);
   }
 
   submitDatabaseSchemaEditor(value: DatabaseSchemaEditorValue): void {
@@ -4708,6 +4806,26 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
 
     this.cancelDatabaseSchemaEditor();
     this.queueSelectionVersionUpdate();
+  }
+
+  private databaseSchemaDraftStorageKey(savedValue: DatabaseSchemaEditorValue): string {
+    return databaseSchemaDraftStorageKeyForNote(this.note().id, savedValue) ?? '';
+  }
+
+  private refreshSchemaLocalDraftStatus(noteId: string): void {
+    const prefix = `${DB_SCHEMA_DRAFT_STORAGE_PREFIX}:${noteId}:`;
+    let hasDraft = false;
+    try {
+      for (let index = 0; index < window.localStorage.length; index += 1) {
+        const key = window.localStorage.key(index);
+        if (!key || !key.startsWith(prefix)) continue;
+        hasDraft = true;
+        break;
+      }
+    } catch {
+      hasDraft = false;
+    }
+    this.hasSchemaLocalDrafts.set(hasDraft);
   }
 
   insertCodeBlock(language: string): void {

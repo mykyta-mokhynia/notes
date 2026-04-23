@@ -87,6 +87,15 @@ interface SelectedConnectionField {
   fieldId: string;
 }
 
+interface SchemaDraftStoragePayload {
+  value: DatabaseSchemaEditorValue;
+}
+
+interface SchemaDraftStorageEventDetail {
+  key: string;
+  hasDraft: boolean;
+}
+
 const SCHEMA_COLOR_PRESETS: SchemaColorPreset[] = [
   { token: 'default', label: 'Default' },
   { token: 'slate', label: 'Slate' },
@@ -230,7 +239,10 @@ const FIELD_TYPE_QUICK_PRESETS = [
               <button type="button" class="schema-visual-btn schema-visual-btn--ghost" (click)="toggleSnap()">
                 Snap: {{ draftSchema().canvas.snapToGrid ? 'On' : 'Off' }}
               </button>
-              <button type="button" class="schema-visual-btn schema-visual-btn--ghost" (click)="cancel.emit()">Cancel</button>
+              @if (hasUnsavedChanges()) {
+                <span class="schema-visual-toolbar__dirty">You have unsaved changes</span>
+              }
+              <button type="button" class="schema-visual-btn schema-visual-btn--ghost" (click)="requestCancel()">Cancel</button>
               <button type="button" class="schema-visual-btn schema-visual-btn--primary" (click)="emitApply()">Apply</button>
             </div>
           </header>
@@ -726,6 +738,13 @@ const FIELD_TYPE_QUICK_PRESETS = [
         text-align: center;
         font-size: 0.76rem;
         color: var(--schema-visual-text-muted);
+      }
+
+      .schema-visual-toolbar__dirty {
+        font-size: 0.74rem;
+        font-weight: 600;
+        color: var(--schema-visual-danger);
+        white-space: nowrap;
       }
 
       .schema-visual-content {
@@ -1312,8 +1331,11 @@ export class DatabaseSchemaEditorComponent {
 
   readonly visible = input(false);
   readonly value = input.required<DatabaseSchemaEditorValue>();
+  readonly savedValue = input<DatabaseSchemaEditorValue | null>(null);
+  readonly draftStorageKey = input<string | null>(null);
   readonly apply = output<DatabaseSchemaEditorValue>();
   readonly cancel = output<void>();
+  readonly unsavedChange = output<boolean>();
   readonly colorPresets = SCHEMA_COLOR_PRESETS;
   readonly postgresFieldTypes = POSTGRES_FIELD_TYPES;
 
@@ -1330,6 +1352,11 @@ export class DatabaseSchemaEditorComponent {
   readonly hoveredRelationId = signal<string | null>(null);
   readonly selectedConnectionField = signal<SelectedConnectionField | null>(null);
   readonly inspectorTab = signal<InspectorTab>('entity');
+  readonly sourceSignature = signal('');
+  readonly restoredLocalDraft = signal(false);
+  readonly hasUnsavedChanges = computed(
+    () => this.sourceSignature() !== this.serializeEditorValue(this.draftTitle(), this.draftSchema(), this.draftView())
+  );
 
   readonly selectedEntity = computed(() =>
     this.draftSchema().entities.find((entity) => entity.id === this.selectedEntityId()) ?? null
@@ -1349,16 +1376,37 @@ export class DatabaseSchemaEditorComponent {
     effect(() => {
       if (!this.visible()) return;
       const source = this.value();
-      this.draftTitle.set(source.title);
-      this.draftSchema.set(JSON.parse(JSON.stringify(source.schema)) as VisualSchemaModel);
-      this.draftView.set(JSON.parse(JSON.stringify(source.view)) as { collapsedAll: boolean; zoom: number; pan: { x: number; y: number } });
-      const firstEntity = source.schema.entities[0]?.id ?? null;
+      const baseline = this.savedValue() ?? source;
+      const restored = this.readStoredDraft();
+      const initialValue = restored ?? source;
+      this.restoredLocalDraft.set(!!restored);
+      this.draftTitle.set(initialValue.title);
+      this.draftSchema.set(JSON.parse(JSON.stringify(initialValue.schema)) as VisualSchemaModel);
+      this.draftView.set(
+        JSON.parse(JSON.stringify(initialValue.view)) as { collapsedAll: boolean; zoom: number; pan: { x: number; y: number } }
+      );
+      this.sourceSignature.set(this.serializeEditorValue(baseline.title, baseline.schema, baseline.view));
+      const firstEntity = initialValue.schema.entities[0]?.id ?? null;
       this.selectedEntityId.set(firstEntity);
       this.selectedRelationId.set(null);
       this.hoveredRelationId.set(null);
       this.inspectorTab.set(firstEntity ? 'entity' : 'canvas');
       this.connectionDraft.set(null);
       this.selectedConnectionField.set(null);
+    });
+
+    effect(() => {
+      if (!this.visible()) return;
+      if (this.hasUnsavedChanges()) {
+        this.writeStoredDraft();
+      } else {
+        this.clearStoredDraft();
+        this.restoredLocalDraft.set(false);
+      }
+    });
+
+    effect(() => {
+      this.unsavedChange.emit(this.visible() ? this.hasUnsavedChanges() : false);
     });
   }
 
@@ -1429,6 +1477,78 @@ export class DatabaseSchemaEditorComponent {
       return value as SchemaColorToken;
     }
     return 'default';
+  }
+
+  private serializeEditorValue(
+    title: string,
+    schema: VisualSchemaModel,
+    view: { collapsedAll: boolean; zoom: number; pan: { x: number; y: number } }
+  ): string {
+    return JSON.stringify({
+      title,
+      schema,
+      view,
+    });
+  }
+
+  private readStoredDraft(): DatabaseSchemaEditorValue | null {
+    const key = this.draftStorageKey();
+    if (!key) return null;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as SchemaDraftStoragePayload | null;
+      if (!parsed || typeof parsed !== 'object' || !parsed.value || typeof parsed.value !== 'object') {
+        return null;
+      }
+      const value = parsed.value as Partial<DatabaseSchemaEditorValue>;
+      const title = typeof value.title === 'string' ? value.title : '';
+      const bodyText = typeof value.bodyText === 'string' ? value.bodyText : '';
+      if (!value.schema || !value.view) return null;
+      return {
+        title,
+        bodyText,
+        schema: value.schema as VisualSchemaModel,
+        view: value.view as { collapsedAll: boolean; zoom: number; pan: { x: number; y: number } },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private writeStoredDraft(): void {
+    const key = this.draftStorageKey();
+    if (!key) return;
+    const payload: SchemaDraftStoragePayload = {
+      value: {
+        title: this.draftTitle(),
+        bodyText: this.value().bodyText,
+        schema: this.draftSchema(),
+        view: this.draftView(),
+      },
+    };
+    try {
+      window.localStorage.setItem(key, JSON.stringify(payload));
+      this.emitDraftStorageChanged(key, true);
+    } catch {
+      // Ignore storage quota and availability errors.
+    }
+  }
+
+  private clearStoredDraft(): void {
+    const key = this.draftStorageKey();
+    if (!key) return;
+    try {
+      window.localStorage.removeItem(key);
+      this.emitDraftStorageChanged(key, false);
+    } catch {
+      // Ignore storage availability errors.
+    }
+  }
+
+  private emitDraftStorageChanged(key: string, hasDraft: boolean): void {
+    const detail: SchemaDraftStorageEventDetail = { key, hasDraft };
+    window.dispatchEvent(new CustomEvent<SchemaDraftStorageEventDetail>('notes-db-schema-draft-changed', { detail }));
   }
 
   private focusPoint(schema: VisualSchemaModel): SchemaPoint {
@@ -3128,13 +3248,31 @@ export class DatabaseSchemaEditorComponent {
     return { x: point.x / length, y: point.y / length };
   }
 
-  handleBackdropPointerDown(event: PointerEvent): void {
+  requestCancel(): void {
+    if (this.hasUnsavedChanges()) {
+      const shouldDiscard = window.confirm('You have unsaved changes. Discard them and close the schema editor?');
+      if (!shouldDiscard) return;
+    }
     this.cancel.emit();
+  }
+
+  handleBackdropPointerDown(event: PointerEvent): void {
+    event.preventDefault();
+    this.requestCancel();
+  }
+
+  @HostListener('document:keydown.escape', ['$event'])
+  onDocumentEscape(event: KeyboardEvent): void {
+    if (!this.visible()) return;
+    event.preventDefault();
+    this.requestCancel();
   }
 
   emitApply(): void {
     const title = this.draftTitle().trim();
     if (!title) return;
+    this.clearStoredDraft();
+    this.restoredLocalDraft.set(false);
     this.apply.emit({
       title,
       bodyText: this.value().bodyText,
