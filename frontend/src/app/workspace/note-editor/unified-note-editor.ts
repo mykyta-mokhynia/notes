@@ -35,7 +35,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { Selection } from '@tiptap/extensions/selection';
 import { Mark as ProseMirrorMark, Node as ProseMirrorNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 import { createLowlight, common } from 'lowlight';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -47,6 +47,20 @@ import { Space, SpacesService } from '../../core/api/spaces.service';
 import { Folder, FoldersService } from '../../core/api/folders.service';
 import { SPACE_AVATAR_OPTIONS } from '../icons/icon-space-avatar';
 import { buildNoteToken, buildSpaceToken, parseNoteIdToken, resolveSpaceIdToken } from '../note-links';
+import { DatabaseSchemaEditorComponent } from './database-schema-editor/database-schema-editor';
+import {
+  DatabaseSchemaAttrs,
+  DatabaseSchemaEditorValue,
+  SchemaColorToken,
+  SCHEMA_COLOR_TOKENS,
+  VisualSchemaModel,
+  VisualSchemaViewState,
+} from './database-schema-types';
+import {
+  createDefaultDatabaseSchemaValue,
+  normalizeDatabaseSchemaAttrs,
+  toDatabaseSchemaNodeAttrs,
+} from './database-schema-mapper';
 
 const RICH_TEXT_BLOCK_TYPE = 'rich_text';
 const LEGACY_TEXT_BLOCK_TYPE = 'text';
@@ -187,6 +201,7 @@ interface FocusedLinkState {
 
 type LinkViewMode = 'inline' | 'text';
 type LinkEditorMode = 'insert' | 'edit';
+type DatabaseSchemaEditorMode = 'insert' | 'edit';
 
 interface LinkEditorState {
   mode: LinkEditorMode;
@@ -198,6 +213,23 @@ interface LinkEditorState {
   left: number;
   top: number;
   error: string | null;
+}
+
+interface DatabaseSchemaEditorState {
+  mode: DatabaseSchemaEditorMode;
+  position: number | null;
+  value: DatabaseSchemaEditorValue;
+  error: string | null;
+}
+
+interface SelectedDatabaseSchemaState {
+  position: number;
+  value: DatabaseSchemaEditorValue;
+}
+
+interface DatabaseSchemaNodeOpenDetail {
+  position: number | null;
+  mode: 'view' | 'edit';
 }
 
 interface LinkMenuIcons {
@@ -447,17 +479,15 @@ function buildDocumentFromBlocks(blocks: NoteBlock[]): JSONContent {
       continue;
     }
     if (block.type === 'db_schema') {
+      const normalized = normalizeDatabaseSchemaAttrs({
+        title: data['title'],
+        body: typeof data['body'] === 'string' ? data['body'] : data['schema'],
+        schema: data['schema'],
+        view: data['view'],
+      });
       nodes.push({
         type: DATABASE_SCHEMA_NODE,
-        attrs: {
-          title: typeof data['title'] === 'string' ? data['title'] : 'Database schema',
-          body:
-            typeof data['body'] === 'string'
-              ? data['body']
-              : typeof data['schema'] === 'string'
-                ? data['schema']
-                : '',
-        },
+        attrs: toDatabaseSchemaNodeAttrs(normalized),
       });
       appendSpacer(nodes);
       continue;
@@ -478,20 +508,102 @@ function buildDocumentFromBlocks(blocks: NoteBlock[]): JSONContent {
   return compact.length ? { type: 'doc', content: compact } : emptyDoc();
 }
 
+function normalizeSchemaColorToken(value: unknown): SchemaColorToken {
+  if (typeof value === 'string' && (SCHEMA_COLOR_TOKENS as readonly string[]).includes(value)) {
+    return value as SchemaColorToken;
+  }
+  return 'default';
+}
+
+function headerTextForHex(background: string): string {
+  const normalized = background.trim();
+  const hex = normalized.startsWith('#') ? normalized.slice(1) : '';
+  if (!(hex.length === 3 || hex.length === 6)) return '#ffffff';
+  const expanded = hex.length === 3 ? `${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}` : hex;
+  const r = Number.parseInt(expanded.slice(0, 2), 16);
+  const g = Number.parseInt(expanded.slice(2, 4), 16);
+  const b = Number.parseInt(expanded.slice(4, 6), 16);
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return '#ffffff';
+  const luminance = (r * 299 + g * 587 + b * 114) / 1000;
+  return luminance > 160 ? '#111827' : '#ffffff';
+}
+
+function applyEntityPaletteStyles(element: HTMLElement, entity: DatabaseSchemaEditorValue['schema']['entities'][number]): void {
+  const token = normalizeSchemaColorToken(entity.style.colorToken);
+  if (token === 'default') {
+    element.style.setProperty('--schema-preview-entity-title', entity.style.titleColor);
+    element.style.setProperty('--schema-preview-entity-title-text', headerTextForHex(entity.style.titleColor));
+    element.style.setProperty('--schema-preview-entity-body', entity.style.blockColor);
+    return;
+  }
+  element.style.setProperty('--schema-preview-entity-title', `var(--schema-palette-${token}-title)`);
+  element.style.setProperty('--schema-preview-entity-title-text', `var(--schema-palette-${token}-title-text)`);
+  element.style.setProperty('--schema-preview-entity-body', `var(--schema-palette-${token}-body)`);
+}
+
+function schemaFieldTags(
+  field: DatabaseSchemaEditorValue['schema']['entities'][number]['fields'][number],
+  isForeignKey: boolean
+): string[] {
+  const tags: string[] = [];
+  if (field.isPrimary) tags.push('PK');
+  if (isForeignKey) tags.push('FK');
+  if (field.isUnique) tags.push('UQ');
+  if (!field.nullable) tags.push('NN');
+  if (field.isIndexed) tags.push('IDX');
+  if (field.isAutoIncrement) tags.push('AI');
+  return tags;
+}
+
+function schemaFieldViewText(
+  entityId: string,
+  field: DatabaseSchemaEditorValue['schema']['entities'][number]['fields'][number],
+  foreignKeyTargets: Set<string>
+): string {
+  const isForeignKey = foreignKeyTargets.has(`${entityId}:${field.id}`);
+  const tags = schemaFieldTags(field, isForeignKey);
+  return `${field.name}: ${field.type}${tags.length ? ` [${tags.join(', ')}]` : ''}`;
+}
+
 const DatabaseSchemaNode = TiptapNode.create({
   name: DATABASE_SCHEMA_NODE,
   group: 'block',
   atom: true,
   selectable: true,
+  draggable: false,
   addAttributes() {
     return {
       title: {
-        default: 'Database schema',
-        parseHTML: (element) => element.getAttribute('data-title') ?? 'Database schema',
+        default: 'Название схемы',
+        parseHTML: (element) => element.getAttribute('data-title') ?? 'Название схемы',
       },
       body: {
         default: '',
         parseHTML: (element) => element.getAttribute('data-body') ?? '',
+      },
+      schema: {
+        default: createDefaultDatabaseSchemaValue().schema,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-schema');
+          if (!raw) return createDefaultDatabaseSchemaValue().schema;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return createDefaultDatabaseSchemaValue().schema;
+          }
+        },
+      },
+      view: {
+        default: createDefaultDatabaseSchemaValue().view,
+        parseHTML: (element) => {
+          const raw = element.getAttribute('data-view');
+          if (!raw) return createDefaultDatabaseSchemaValue().view;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return createDefaultDatabaseSchemaValue().view;
+          }
+        },
       },
     };
   },
@@ -499,23 +611,802 @@ const DatabaseSchemaNode = TiptapNode.create({
     return [{ tag: 'div[data-database-schema]' }];
   },
   renderHTML({ node }) {
-    const title = typeof node.attrs['title'] === 'string' ? node.attrs['title'] : 'Database schema';
-    const body = typeof node.attrs['body'] === 'string' ? node.attrs['body'] : '';
+    const normalized = normalizeDatabaseSchemaAttrs(node.attrs as DatabaseSchemaAttrs);
+    const title = normalized.title;
+    const foreignKeyTargets = new Set(
+      normalized.schema.relations
+        .filter((relation) => !!relation.toFieldId)
+        .map((relation) => `${relation.toEntityId}:${relation.toFieldId}`)
+    );
+    const entityPreviewNodes = normalized.schema.entities.slice(0, 4).map((entity) => {
+      const token = normalizeSchemaColorToken(entity.style.colorToken);
+      const style =
+        token === 'default'
+          ? `--schema-preview-entity-title:${entity.style.titleColor};--schema-preview-entity-title-text:${headerTextForHex(entity.style.titleColor)};--schema-preview-entity-body:${entity.style.blockColor};`
+          : `--schema-preview-entity-title:var(--schema-palette-${token}-title);--schema-preview-entity-title-text:var(--schema-palette-${token}-title-text);--schema-preview-entity-body:var(--schema-palette-${token}-body);`;
+      return [
+        'article',
+        {
+          class: 'database-schema-card__entity',
+          style,
+        },
+        ['header', { class: 'database-schema-card__entity-header' }, entity.name],
+        [
+          'ul',
+          { class: 'database-schema-card__entity-fields' },
+          ...entity.fields.slice(0, 4).map((field) => [
+            'li',
+            {
+              style:
+                normalizeSchemaColorToken(field.colorToken) === 'default'
+                  ? ''
+                  : `background:var(--schema-palette-${normalizeSchemaColorToken(field.colorToken)}-field-bg);`,
+            },
+            schemaFieldViewText(entity.id, field, foreignKeyTargets),
+          ]),
+        ],
+      ];
+    });
     return [
       'div',
       {
         'data-database-schema': 'true',
         'data-title': title,
-        'data-body': body,
+        'data-body': normalized.bodyText,
+        'data-schema': JSON.stringify(normalized.schema),
+        'data-view': JSON.stringify(normalized.view),
       },
       [
         'div',
-        { class: 'database-schema-card' },
-        ['div', { class: 'database-schema-card__eyebrow' }, 'Database schema'],
+        { class: 'database-schema-card database-schema-card--visual' },
+        ['div', { class: 'database-schema-card__eyebrow' }, 'Название схемы'],
         ['div', { class: 'database-schema-card__title' }, title],
-        ['pre', { class: 'database-schema-card__body' }, body || 'No schema body'],
+        ['div', { class: 'database-schema-card__canvas' }, ...entityPreviewNodes],
       ],
     ];
+  },
+  addNodeView() {
+    return ({ node, editor, getPos }) => {
+      let currentNode = node;
+      const wrapper = document.createElement('div');
+      wrapper.className = 'database-schema-card database-schema-card--visual database-schema-card--node';
+      wrapper.setAttribute('data-database-schema-node-view', 'true');
+
+      const title = document.createElement('div');
+      title.className = 'database-schema-card__title';
+
+      const canvas = document.createElement('div');
+      canvas.className = 'database-schema-card__canvas';
+      const frame = document.createElement('div');
+      frame.className = 'database-schema-card__canvas-frame';
+      const viewport = document.createElement('div');
+      viewport.className = 'database-schema-card__canvas-viewport';
+      const panSurface = document.createElement('div');
+      panSurface.className = 'database-schema-card__pan-surface';
+      const relationsLayer = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      relationsLayer.setAttribute('class', 'database-schema-card__relations');
+      const entitiesLayer = document.createElement('div');
+      entitiesLayer.className = 'database-schema-card__entities';
+      const openEditorButton = document.createElement('button');
+      openEditorButton.type = 'button';
+      openEditorButton.className = 'database-schema-card__action database-schema-card__action--expand';
+      openEditorButton.title = 'Расширить схему';
+      openEditorButton.setAttribute('aria-label', 'Расширить схему');
+      openEditorButton.innerHTML =
+        "<svg viewBox='0 0 24 24' focusable='false' aria-hidden='true'><path d='M15 3h6v6m0-6-7 7M9 21H3v-6m0 6 7-7M21 15v6h-6m6 0-7-7M3 9V3h6M3 3l7 7'/></svg>";
+
+      viewport.append(relationsLayer, entitiesLayer);
+      frame.append(viewport, panSurface, openEditorButton);
+      canvas.append(frame);
+      wrapper.append(title, canvas);
+      wrapper.setAttribute('draggable', 'false');
+      wrapper.addEventListener('dragstart', (event) => {
+        event.preventDefault();
+      });
+
+      let frameWidth = 860;
+      let frameHeight = 329;
+      let sceneWidth = 1;
+      let sceneHeight = 1;
+      let fitScale = 1;
+      let panX = 0;
+      let panY = 0;
+      let zoom = 1;
+      const arrowMarkerId = `schemaCardArrow_${Math.random().toString(36).slice(2, 10)}`;
+      let panState: { pointerId: number; startX: number; startY: number; originX: number; originY: number } | null = null;
+
+      const nodePosition = (): number | null => {
+        if (typeof getPos !== 'function') return null;
+        const value = getPos();
+        return typeof value === 'number' ? value : null;
+      };
+
+      const selectNode = (): void => {
+        const position = nodePosition();
+        if (position === null) return;
+        const selection = NodeSelection.create(editor.state.doc, position);
+        editor.view.dispatch(editor.state.tr.setSelection(selection));
+      };
+
+      const openSchemaEditor = (mode: 'view' | 'edit'): void => {
+        const position = nodePosition();
+        window.dispatchEvent(
+          new CustomEvent('notes-database-schema-open', {
+            detail: {
+              position,
+              mode,
+            },
+          })
+        );
+      };
+
+      const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
+      const applyTransform = (): void => {
+        const totalScale = fitScale * zoom;
+        viewport.style.transform = `translate(${panX}px, ${panY}px) scale(${totalScale})`;
+      };
+
+      const recalcFrame = (): void => {
+        const rect = frame.getBoundingClientRect();
+        frameWidth = Math.max(540, Math.round(rect.width || 860));
+        frameHeight = Math.max(259, Math.round(rect.height || 329));
+      };
+
+      const renderEntities = (value: DatabaseSchemaEditorValue): void => {
+        entitiesLayer.replaceChildren();
+        relationsLayer.replaceChildren();
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', arrowMarkerId);
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '6');
+        marker.setAttribute('refX', '7');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        const markerPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        markerPath.setAttribute('d', 'M0,0 L8,3 L0,6 z');
+        markerPath.setAttribute('fill', 'currentColor');
+        marker.append(markerPath);
+        defs.append(marker);
+        relationsLayer.append(defs);
+
+        const entities = value.schema.entities.slice(0, 20);
+        const foreignKeyTargets = new Set(
+          value.schema.relations
+            .filter((relation) => !!relation.toFieldId)
+            .map((relation) => `${relation.toEntityId}:${relation.toFieldId}`)
+        );
+        if (!entities.length) {
+          const empty = document.createElement('div');
+          empty.className = 'database-schema-card__canvas-empty';
+          empty.textContent = 'No entities';
+          entitiesLayer.append(empty);
+          sceneWidth = frameWidth;
+          sceneHeight = frameHeight;
+          fitScale = 1;
+          applyTransform();
+          return;
+        }
+
+        type PortSide = 'left' | 'right' | 'top' | 'bottom';
+        type LocalPoint = { x: number; y: number };
+        type EntityGeom = { x: number; y: number; w: number; h: number; rowHeight: number; headerHeight: number };
+        const relationDegree = new Map<string, number>();
+        for (const entity of entities) {
+          relationDegree.set(entity.id, 0);
+        }
+        for (const relation of value.schema.relations) {
+          if (relationDegree.has(relation.fromEntityId)) {
+            relationDegree.set(relation.fromEntityId, (relationDegree.get(relation.fromEntityId) ?? 0) + 1);
+          }
+          if (relationDegree.has(relation.toEntityId)) {
+            relationDegree.set(relation.toEntityId, (relationDegree.get(relation.toEntityId) ?? 0) + 1);
+          }
+        }
+        let rootEntity = entities[0];
+        for (const entity of entities) {
+          const candidateDegree = relationDegree.get(entity.id) ?? 0;
+          const rootDegree = relationDegree.get(rootEntity.id) ?? 0;
+          if (candidateDegree > rootDegree) {
+            rootEntity = entity;
+          }
+        }
+        const rootPaddingX = 220;
+        const rootPaddingY = 160;
+        const rootPosition = { x: rootEntity.position.x, y: rootEntity.position.y };
+        const entitiesById = new Map(value.schema.entities.map((entity) => [entity.id, entity]));
+        const points = new Map<string, EntityGeom>();
+        let maxX = rootPaddingX;
+        let maxY = rootPaddingY;
+        for (const entity of entities) {
+          const x = entity.position.x - rootPosition.x + rootPaddingX;
+          const y = entity.position.y - rootPosition.y + rootPaddingY;
+          const w = Math.max(220, entity.size.w);
+          const h = Math.max(160, entity.size.h);
+          points.set(entity.id, { x, y, w, h, rowHeight: 18, headerHeight: 28 });
+          maxX = Math.max(maxX, x + w);
+          maxY = Math.max(maxY, y + h);
+        }
+        const routePadding = 220;
+        sceneWidth = Math.max(1, maxX + routePadding);
+        sceneHeight = Math.max(1, maxY + routePadding);
+        viewport.style.width = `${sceneWidth}px`;
+        viewport.style.height = `${sceneHeight}px`;
+        relationsLayer.setAttribute('viewBox', `0 0 ${sceneWidth} ${sceneHeight}`);
+        relationsLayer.setAttribute('width', `${sceneWidth}`);
+        relationsLayer.setAttribute('height', `${sceneHeight}`);
+        const rawFit = Math.min(frameWidth / sceneWidth, frameHeight / sceneHeight);
+        fitScale = clamp(rawFit, 0.1, 1);
+
+        const entityCenter = (geom: EntityGeom): LocalPoint => ({ x: geom.x + geom.w / 2, y: geom.y + geom.h / 2 });
+        const bestPortSide = (from: LocalPoint, to: LocalPoint): PortSide => {
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            return dx >= 0 ? 'right' : 'left';
+          }
+          return dy >= 0 ? 'bottom' : 'top';
+        };
+        const resolvePortSide = (
+          relation: VisualSchemaModel['relations'][number],
+          kind: 'from' | 'to',
+          fromGeom: EntityGeom,
+          toGeom: EntityGeom
+        ): PortSide => {
+          const explicit = kind === 'from' ? relation.fromPortSide : relation.toPortSide;
+          const fieldId = kind === 'from' ? relation.fromFieldId : relation.toFieldId;
+          if (fieldId) {
+            if (explicit === 'left' || explicit === 'right') return explicit;
+            return entityCenter(toGeom).x >= entityCenter(fromGeom).x ? 'right' : 'left';
+          }
+          return bestPortSide(entityCenter(fromGeom), entityCenter(toGeom));
+        };
+        const fieldLane = (entityId: string, fieldId: string | null, geom: EntityGeom): LocalPoint => {
+          const entity = entitiesById.get(entityId);
+          if (!entity || !fieldId) return { x: geom.x + geom.w / 2, y: geom.y + geom.h / 2 };
+          const index = Math.max(0, entity.fields.findIndex((field) => field.id === fieldId));
+          return {
+            x: geom.x + geom.w / 2,
+            y: Math.min(geom.y + geom.h - 10, geom.y + geom.headerHeight + geom.rowHeight * index + geom.rowHeight / 2),
+          };
+        };
+        const portPoint = (entityId: string, fieldId: string | null, side: PortSide, outward: number, geom: EntityGeom): LocalPoint => {
+          const lane = fieldLane(entityId, fieldId, geom);
+          switch (side) {
+            case 'left':
+              return { x: geom.x - outward, y: lane.y };
+            case 'right':
+              return { x: geom.x + geom.w + outward, y: lane.y };
+            case 'top':
+              return { x: lane.x, y: geom.y - outward };
+            default:
+              return { x: lane.x, y: geom.y + geom.h + outward };
+          }
+        };
+        const expandedEntityBounds = (
+          geom: EntityGeom,
+          padding: number
+        ): { left: number; right: number; top: number; bottom: number } => ({
+          left: geom.x - padding,
+          right: geom.x + geom.w + padding,
+          top: geom.y - padding,
+          bottom: geom.y + geom.h + padding,
+        });
+        const pointInsideRect = (
+          point: LocalPoint,
+          rect: { left: number; right: number; top: number; bottom: number }
+        ): boolean => point.x > rect.left && point.x < rect.right && point.y > rect.top && point.y < rect.bottom;
+        const projectFromPort = (point: LocalPoint, side: PortSide, distance: number): LocalPoint => {
+          switch (side) {
+            case 'right':
+              return { x: point.x + distance, y: point.y };
+            case 'left':
+              return { x: point.x - distance, y: point.y };
+            case 'top':
+              return { x: point.x, y: point.y - distance };
+            default:
+              return { x: point.x, y: point.y + distance };
+          }
+        };
+        const normalizeVector = (point: LocalPoint): LocalPoint | null => {
+          const length = Math.hypot(point.x, point.y);
+          if (length < 0.0001) return null;
+          return { x: point.x / length, y: point.y / length };
+        };
+        const normalizeOrthogonalPoints = (pathPoints: LocalPoint[]): LocalPoint[] => {
+          if (pathPoints.length <= 1) return pathPoints;
+
+          // 1. expand accidental diagonals into orthogonal turns
+          const orthogonalized: LocalPoint[] = [pathPoints[0]];
+          for (let index = 1; index < pathPoints.length; index += 1) {
+            const prev = orthogonalized[orthogonalized.length - 1];
+            const next = pathPoints[index];
+            const dx = Math.abs(next.x - prev.x);
+            const dy = Math.abs(next.y - prev.y);
+            if (dx > 0.001 && dy > 0.001) {
+              orthogonalized.push({ x: next.x, y: prev.y });
+            }
+            orthogonalized.push(next);
+          }
+
+          // 2. remove exact duplicates / near duplicates
+          const deduped = orthogonalized.filter((point, index) => {
+            if (index === 0) return true;
+            const prev = orthogonalized[index - 1];
+            return Math.abs(point.x - prev.x) > 0.001 || Math.abs(point.y - prev.y) > 0.001;
+          });
+
+          if (deduped.length <= 2) return deduped;
+
+          // 3. remove redundant collinear points
+          const result: LocalPoint[] = [deduped[0]];
+
+          for (let i = 1; i < deduped.length - 1; i++) {
+            const prev = result[result.length - 1];
+            const curr = deduped[i];
+            const next = deduped[i + 1];
+
+            const sameX = Math.abs(prev.x - curr.x) <= 0.001 && Math.abs(curr.x - next.x) <= 0.001;
+            const sameY = Math.abs(prev.y - curr.y) <= 0.001 && Math.abs(curr.y - next.y) <= 0.001;
+
+            if (!sameX && !sameY) {
+              result.push(curr);
+            }
+          }
+
+          result.push(deduped[deduped.length - 1]);
+          return squashTinyOrthogonalSegments(result, 6);
+        };
+
+        const squashTinyOrthogonalSegments = (pathPoints: LocalPoint[], minLength: number): LocalPoint[] => {
+          if (pathPoints.length <= 2) return pathPoints;
+          const epsilon = 0.001;
+          const working = pathPoints.map((point) => ({ ...point }));
+          const output: LocalPoint[] = [working[0]];
+          for (let index = 1; index < working.length - 1; index += 1) {
+            const prev = output[output.length - 1];
+            const curr = working[index];
+            const next = working[index + 1];
+            const segmentLength = Math.hypot(curr.x - prev.x, curr.y - prev.y);
+            if (segmentLength >= minLength) {
+              output.push(curr);
+              continue;
+            }
+
+            const prevHorizontal = Math.abs(prev.y - curr.y) <= epsilon;
+            const prevVertical = Math.abs(prev.x - curr.x) <= epsilon;
+            const nextHorizontal = Math.abs(curr.y - next.y) <= epsilon;
+            const nextVertical = Math.abs(curr.x - next.x) <= epsilon;
+
+            // Replace tiny orthogonal "nicks" with a cleaner corner by shifting the following point.
+            if (index + 1 < working.length - 1 && prevHorizontal && nextVertical) {
+              working[index + 1] = { ...next, x: prev.x };
+              continue;
+            }
+            if (index + 1 < working.length - 1 && prevVertical && nextHorizontal) {
+              working[index + 1] = { ...next, y: prev.y };
+              continue;
+            }
+
+            // For tiny straight segments, dropping the middle point keeps the path cleaner.
+            if ((prevHorizontal && nextHorizontal) || (prevVertical && nextVertical)) {
+              continue;
+            }
+
+            output.push(curr);
+          }
+          output.push(working[working.length - 1]);
+
+          const deduped = output.filter((point, index) => {
+            if (index === 0) return true;
+            const prev = output[index - 1];
+            return Math.abs(point.x - prev.x) > epsilon || Math.abs(point.y - prev.y) > epsilon;
+          });
+          if (deduped.length <= 2) return deduped;
+
+          const compact: LocalPoint[] = [deduped[0]];
+          for (let index = 1; index < deduped.length - 1; index += 1) {
+            const prev = compact[compact.length - 1];
+            const curr = deduped[index];
+            const next = deduped[index + 1];
+            const sameX = Math.abs(prev.x - curr.x) <= epsilon && Math.abs(curr.x - next.x) <= epsilon;
+            const sameY = Math.abs(prev.y - curr.y) <= epsilon && Math.abs(curr.y - next.y) <= epsilon;
+            if (!sameX && !sameY) {
+              compact.push(curr);
+            }
+          }
+          compact.push(deduped[deduped.length - 1]);
+          return compact;
+        };
+        const clampAgainstSourceBacktracking = (
+          point: LocalPoint,
+          source: LocalPoint,
+          side: PortSide,
+          minForward: number
+        ): LocalPoint => {
+          switch (side) {
+            case 'right':
+              return { ...point, x: Math.max(point.x, source.x + minForward) };
+            case 'left':
+              return { ...point, x: Math.min(point.x, source.x - minForward) };
+            case 'bottom':
+              return { ...point, y: Math.max(point.y, source.y + minForward) };
+            case 'top':
+              return { ...point, y: Math.min(point.y, source.y - minForward) };
+            default:
+              return point;
+          }
+        };
+        const clampAgainstTargetApproach = (
+          point: LocalPoint,
+          target: LocalPoint,
+          side: PortSide,
+          minForward: number
+        ): LocalPoint => {
+          switch (side) {
+            case 'right':
+              return { ...point, x: Math.max(point.x, target.x + minForward) };
+            case 'left':
+              return { ...point, x: Math.min(point.x, target.x - minForward) };
+            case 'bottom':
+              return { ...point, y: Math.max(point.y, target.y + minForward) };
+            case 'top':
+              return { ...point, y: Math.min(point.y, target.y - minForward) };
+            default:
+              return point;
+          }
+        };
+        const routeSearchBounds = (
+          start: LocalPoint,
+          end: LocalPoint,
+          rects: Array<{ left: number; right: number; top: number; bottom: number }>,
+          step: number
+        ): { minX: number; minY: number; width: number; height: number } => {
+          const margin = 120;
+          const allX = [start.x, end.x, ...rects.flatMap((rect) => [rect.left, rect.right])];
+          const allY = [start.y, end.y, ...rects.flatMap((rect) => [rect.top, rect.bottom])];
+          const minX = Math.floor((Math.min(...allX) - margin) / step) * step;
+          const minY = Math.floor((Math.min(...allY) - margin) / step) * step;
+          const maxX = Math.ceil((Math.max(...allX) + margin) / step) * step;
+          const maxY = Math.ceil((Math.max(...allY) + margin) / step) * step;
+          return {
+            minX,
+            minY,
+            width: Math.max(1, Math.round((maxX - minX) / step)),
+            height: Math.max(1, Math.round((maxY - minY) / step)),
+          };
+        };
+        const routeAroundEntities = (start: LocalPoint, end: LocalPoint, clearance: number): LocalPoint[] | null => {
+          const step = 10;
+          const blockedRects = Array.from(points.values()).map((geom) => expandedEntityBounds(geom, clearance));
+          if (!blockedRects.length) return [start, end];
+          const bounds = routeSearchBounds(start, end, blockedRects, step);
+          type Cell = { gx: number; gy: number };
+          const toCell = (point: LocalPoint): Cell => ({
+            gx: Math.round((point.x - bounds.minX) / step),
+            gy: Math.round((point.y - bounds.minY) / step),
+          });
+          const toPoint = (cell: Cell): LocalPoint => ({
+            x: bounds.minX + cell.gx * step,
+            y: bounds.minY + cell.gy * step,
+          });
+          const keyOf = (cell: Cell): string => `${cell.gx}:${cell.gy}`;
+          const startCell = toCell(start);
+          const endCell = toCell(end);
+          const startKey = keyOf(startCell);
+          const endKey = keyOf(endCell);
+          const isCellBlocked = (cell: Cell): boolean => {
+            if (cell.gx < 0 || cell.gx > bounds.width || cell.gy < 0 || cell.gy > bounds.height) return true;
+            const key = keyOf(cell);
+            if (key === startKey || key === endKey) return false;
+            const point = toPoint(cell);
+            return blockedRects.some((rect) => pointInsideRect(point, rect));
+          };
+          const neighbors = (cell: Cell): Cell[] => [
+            { gx: cell.gx + 1, gy: cell.gy },
+            { gx: cell.gx - 1, gy: cell.gy },
+            { gx: cell.gx, gy: cell.gy + 1 },
+            { gx: cell.gx, gy: cell.gy - 1 },
+          ];
+          const heuristic = (cell: Cell): number => Math.abs(cell.gx - endCell.gx) + Math.abs(cell.gy - endCell.gy);
+          const queue: Array<{ cell: Cell; priority: number }> = [{ cell: startCell, priority: heuristic(startCell) }];
+          const cameFrom = new Map<string, string>();
+          const gScore = new Map<string, number>([[startKey, 0]]);
+          const visited = new Set<string>();
+          const maxIterations = 24000;
+          let iterations = 0;
+          while (queue.length && iterations < maxIterations) {
+            iterations += 1;
+            queue.sort((a, b) => a.priority - b.priority);
+            const current = queue.shift()!.cell;
+            const currentKey = keyOf(current);
+            if (visited.has(currentKey)) continue;
+            visited.add(currentKey);
+            if (currentKey === endKey) {
+              const cells: Cell[] = [current];
+              let backtrack = currentKey;
+              while (cameFrom.has(backtrack)) {
+                backtrack = cameFrom.get(backtrack)!;
+                const [gx, gy] = backtrack.split(':').map((value) => Number.parseInt(value, 10));
+                cells.push({ gx, gy });
+              }
+              cells.reverse();
+              const routed = cells.map((cell) => toPoint(cell));
+              routed[0] = start;
+              routed[routed.length - 1] = end;
+              return normalizeOrthogonalPoints(routed);
+            }
+            const currentG = gScore.get(currentKey) ?? Number.POSITIVE_INFINITY;
+            for (const next of neighbors(current)) {
+              if (isCellBlocked(next)) continue;
+              const nextKey = keyOf(next);
+              const tentative = currentG + 1;
+              const known = gScore.get(nextKey);
+              if (known !== undefined && tentative >= known) continue;
+              cameFrom.set(nextKey, currentKey);
+              gScore.set(nextKey, tentative);
+              queue.push({ cell: next, priority: tentative + heuristic(next) });
+            }
+          }
+          return null;
+        };
+        const defaultOrthogonalPoints = (start: LocalPoint, end: LocalPoint, sourceSide: PortSide, targetSide: PortSide): LocalPoint[] => {
+          const portStub = 24;
+          const minForward = 56;
+          const sourceStub = projectFromPort(start, sourceSide, portStub);
+          const targetStub = projectFromPort(end, targetSide, portStub);
+          const sourceSafe = projectFromPort(start, sourceSide, minForward);
+          const targetSafe = projectFromPort(end, targetSide, minForward);
+          const sourceHorizontal = sourceSide === 'left' || sourceSide === 'right';
+          const targetHorizontal = targetSide === 'left' || targetSide === 'right';
+          let middle: LocalPoint[] = [];
+          if (sourceHorizontal && targetHorizontal) {
+            const midX = (sourceSafe.x + targetSafe.x) / 2;
+            middle = [
+              { x: midX, y: sourceSafe.y },
+              { x: midX, y: targetSafe.y },
+            ];
+          } else if (!sourceHorizontal && !targetHorizontal) {
+            const midY = (sourceSafe.y + targetSafe.y) / 2;
+            middle = [
+              { x: sourceSafe.x, y: midY },
+              { x: targetSafe.x, y: midY },
+            ];
+          } else if (sourceHorizontal) {
+            middle = [{ x: targetSafe.x, y: sourceSafe.y }];
+          } else {
+            middle = [{ x: sourceSafe.x, y: targetSafe.y }];
+          }
+          if (middle.length) {
+            middle[0] = clampAgainstSourceBacktracking(middle[0], start, sourceSide, minForward);
+            const lastIndex = middle.length - 1;
+            middle[lastIndex] = clampAgainstTargetApproach(middle[lastIndex], end, targetSide, minForward);
+          }
+          const fallbackPath = normalizeOrthogonalPoints([start, sourceStub, sourceSafe, ...middle, targetSafe, targetStub, end]);
+          const obstaclePath = routeAroundEntities(sourceSafe, targetSafe, 10);
+          if (!obstaclePath || obstaclePath.length < 2) {
+            return fallbackPath;
+          }
+          return normalizeOrthogonalPoints([start, sourceStub, ...obstaclePath, targetStub, end]);
+        };
+        const segmentIntersection = (a1: LocalPoint, a2: LocalPoint, b1: LocalPoint, b2: LocalPoint): LocalPoint | null => {
+          const d = (a2.x - a1.x) * (b2.y - b1.y) - (a2.y - a1.y) * (b2.x - b1.x);
+          if (Math.abs(d) < 0.001) return null;
+          const ua = ((b1.x - a1.x) * (b2.y - b1.y) - (b1.y - a1.y) * (b2.x - b1.x)) / d;
+          const ub = ((b1.x - a1.x) * (a2.y - a1.y) - (b1.y - a1.y) * (a2.x - a1.x)) / d;
+          if (ua < 0 || ua > 1 || ub < 0 || ub > 1) return null;
+          return {
+            x: a1.x + ua * (a2.x - a1.x),
+            y: a1.y + ua * (a2.y - a1.y),
+          };
+        };
+        const segmentIntersectionWithRect = (
+          start: LocalPoint,
+          end: LocalPoint,
+          rect: { left: number; right: number; top: number; bottom: number }
+        ): LocalPoint | null => {
+          const intersections: LocalPoint[] = [];
+          const edges: [LocalPoint, LocalPoint][] = [
+            [{ x: rect.left, y: rect.top }, { x: rect.right, y: rect.top }],
+            [{ x: rect.right, y: rect.top }, { x: rect.right, y: rect.bottom }],
+            [{ x: rect.right, y: rect.bottom }, { x: rect.left, y: rect.bottom }],
+            [{ x: rect.left, y: rect.bottom }, { x: rect.left, y: rect.top }],
+          ];
+          for (const [edgeStart, edgeEnd] of edges) {
+            const point = segmentIntersection(start, end, edgeStart, edgeEnd);
+            if (point) intersections.push(point);
+          }
+          if (!intersections.length) return null;
+          intersections.sort((a, b) => Math.hypot(a.x - start.x, a.y - start.y) - Math.hypot(b.x - start.x, b.y - start.y));
+          return intersections[0];
+        };
+        const ensureLastSegmentMinLength = (pathPoints: LocalPoint[], minLength: number, fallbackDirection: LocalPoint): void => {
+          if (pathPoints.length < 2) return;
+          const lastIndex = pathPoints.length - 1;
+          const prevIndex = lastIndex - 1;
+          const last = pathPoints[lastIndex];
+          const prev = pathPoints[prevIndex];
+          const currentLength = Math.hypot(last.x - prev.x, last.y - prev.y);
+          if (currentLength >= minLength) return;
+          const norm = normalizeVector({ x: prev.x - last.x, y: prev.y - last.y }) ?? fallbackDirection;
+          pathPoints[prevIndex] = {
+            x: last.x + norm.x * minLength,
+            y: last.y + norm.y * minLength,
+          };
+        };
+        const applyEndpointRules = (
+          pathPoints: LocalPoint[],
+          targetBounds: { left: number; right: number; top: number; bottom: number },
+          endingMode: VisualSchemaModel['relations'][number]['endingMode']
+        ): LocalPoint[] => {
+          if (pathPoints.length < 2) return pathPoints;
+          const basePoints = [...pathPoints];
+          const prev = basePoints[basePoints.length - 2];
+          const rawEnd = basePoints[basePoints.length - 1];
+          const impact = segmentIntersectionWithRect(prev, rawEnd, targetBounds) ?? rawEnd;
+          const dir = normalizeVector({ x: impact.x - prev.x, y: impact.y - prev.y }) ?? { x: 1, y: 0 };
+          const tipInset = endingMode === 'edge' ? 0 : endingMode === 'offset-edge' ? 4 : 8;
+          const arrowLength = 9;
+          const tip = { x: impact.x - dir.x * tipInset, y: impact.y - dir.y * tipInset };
+          const lineEnd = { x: tip.x - dir.x * arrowLength, y: tip.y - dir.y * arrowLength };
+          basePoints[basePoints.length - 1] = lineEnd;
+          ensureLastSegmentMinLength(basePoints, 14, dir);
+          return basePoints;
+        };
+        const pathFromPoints = (pathPoints: Array<{ x: number; y: number }>): string => {
+          if (!pathPoints.length) return '';
+          let d = `M ${pathPoints[0].x} ${pathPoints[0].y}`;
+          for (let index = 1; index < pathPoints.length; index += 1) {
+            d += ` L ${pathPoints[index].x} ${pathPoints[index].y}`;
+          }
+          return d;
+        };
+
+        for (const relation of value.schema.relations.slice(0, 24)) {
+          const from = points.get(relation.fromEntityId);
+          const to = points.get(relation.toEntityId);
+          if (!from || !to) continue;
+          const fromSide = resolvePortSide(relation, 'from', from, to);
+          const toSide = resolvePortSide(relation, 'to', to, from);
+          const safePadding = 10;
+          const start = portPoint(relation.fromEntityId, relation.fromFieldId, fromSide, safePadding, from);
+          const endHint = portPoint(relation.toEntityId, relation.toFieldId, toSide, safePadding, to);
+          const targetBounds = expandedEntityBounds(to, safePadding);
+          const mappedBendPoints = relation.bendPoints.map((point) => ({
+            x: point.x - rootPosition.x + rootPaddingX,
+            y: point.y - rootPosition.y + rootPaddingY,
+          }));
+          const rawPoints = mappedBendPoints.length
+            ? normalizeOrthogonalPoints([start, ...mappedBendPoints, endHint])
+            : normalizeOrthogonalPoints(defaultOrthogonalPoints(start, endHint, fromSide, toSide));
+          const linePoints = applyEndpointRules(rawPoints, targetBounds, relation.endingMode);
+          const d = pathFromPoints(linePoints);
+          const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          line.setAttribute('d', d);
+          line.setAttribute('fill', 'none');
+          line.setAttribute('stroke', relation.style.color || 'var(--schema-card-relation, #7f8fb8)');
+          line.setAttribute('stroke-width', '1.4');
+          line.setAttribute('stroke-opacity', '0.86');
+          line.setAttribute('marker-end', `url(#${arrowMarkerId})`);
+          (line.style as CSSStyleDeclaration).color = relation.style.color || 'var(--schema-card-relation, #7f8fb8)';
+          relationsLayer.append(line);
+        }
+
+        for (const entity of entities) {
+          const card = document.createElement('article');
+          card.className = 'database-schema-card__entity';
+          applyEntityPaletteStyles(card, entity);
+          const point = points.get(entity.id);
+          if (point) {
+            card.style.left = `${point.x}px`;
+            card.style.top = `${point.y}px`;
+            card.style.width = `${point.w}px`;
+            card.style.height = `${point.h}px`;
+          }
+
+          const header = document.createElement('header');
+          header.className = 'database-schema-card__entity-header';
+          header.textContent = entity.name;
+          card.append(header);
+
+          const fields = document.createElement('ul');
+          fields.className = 'database-schema-card__entity-fields';
+          for (const field of entity.fields.slice(0, 4)) {
+            const line = document.createElement('li');
+            line.textContent = schemaFieldViewText(entity.id, field, foreignKeyTargets);
+            const token = normalizeSchemaColorToken(field.colorToken);
+            if (token !== 'default') {
+              line.style.background = `var(--schema-palette-${token}-field-bg)`;
+            }
+            fields.append(line);
+          }
+          card.append(fields);
+
+          entitiesLayer.append(card);
+        }
+        applyTransform();
+      };
+
+      const applyNodeState = (nextNode: typeof node): void => {
+        currentNode = nextNode;
+        const normalized = normalizeDatabaseSchemaAttrs(nextNode.attrs as DatabaseSchemaAttrs);
+        title.textContent = normalized.title;
+        openEditorButton.disabled = !editor.isEditable;
+        openEditorButton.title = editor.isEditable ? 'Расширить схему' : 'Откройте note в режиме редактирования';
+        renderEntities(normalized);
+      };
+
+      const onPointerMove = (event: PointerEvent): void => {
+        if (!panState || panState.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        panX = panState.originX + (event.clientX - panState.startX);
+        panY = panState.originY + (event.clientY - panState.startY);
+        applyTransform();
+      };
+
+      const onPointerUp = (event: PointerEvent): void => {
+        if (!panState || panState.pointerId !== event.pointerId) return;
+        if (panSurface.hasPointerCapture(event.pointerId)) {
+          panSurface.releasePointerCapture(event.pointerId);
+        }
+        panState = null;
+        frame.classList.remove('database-schema-card__canvas-frame--panning');
+      };
+
+      const startPan = (event: PointerEvent): void => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        panState = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          originX: panX,
+          originY: panY,
+        };
+        frame.classList.add('database-schema-card__canvas-frame--panning');
+        panSurface.setPointerCapture(event.pointerId);
+        selectNode();
+      };
+      panSurface.addEventListener('pointerdown', startPan);
+      panSurface.addEventListener('pointermove', onPointerMove);
+      panSurface.addEventListener('pointerup', onPointerUp);
+      panSurface.addEventListener('pointercancel', onPointerUp);
+
+      frame.addEventListener('wheel', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const delta = event.deltaY < 0 ? 0.1 : -0.1;
+        zoom = clamp(Number((zoom + delta).toFixed(2)), 0.5, 2.4);
+        applyTransform();
+      });
+
+      openEditorButton.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!editor.isEditable) return;
+        selectNode();
+        openSchemaEditor('edit');
+      });
+
+      recalcFrame();
+      applyNodeState(currentNode);
+      return {
+        dom: wrapper,
+        update(nextNode) {
+          if (nextNode.type.name !== DATABASE_SCHEMA_NODE) return false;
+          recalcFrame();
+          applyNodeState(nextNode);
+          return true;
+        },
+        destroy() {
+          panSurface.removeEventListener('pointermove', onPointerMove);
+          panSurface.removeEventListener('pointerup', onPointerUp);
+          panSurface.removeEventListener('pointercancel', onPointerUp);
+        },
+      };
+    };
   },
 });
 
@@ -836,7 +1727,7 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
 @Component({
   selector: 'app-unified-note-editor',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, DatabaseSchemaEditorComponent],
   template: `
     <div class="unified-note-editor-shell">
       <div class="note-editor-topbar">
@@ -1324,7 +2215,9 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
 
               @if (plusMenuOpen()) {
                 <div class="toolbar-popover toolbar-popover--menu">
-                  <button type="button" class="toolbar-menu-item" (click)="insertDatabaseSchema()">Database schema</button>
+                  <button type="button" class="toolbar-menu-item" (click)="insertDatabaseSchema()">
+                    {{ databaseSchemaMenuLabel() }}
+                  </button>
                   <div class="toolbar-menu-heading">Code block</div>
                   <div class="toolbar-menu-heading toolbar-menu-heading--hint">Tip: /code or /code ts</div>
                   @for (language of codeLanguages; track language) {
@@ -1525,6 +2418,14 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
               <button type="submit" class="link-editor-popover__btn">Apply</button>
             </div>
           </form>
+        }
+        @if (databaseSchemaEditorState(); as schemaState) {
+          <app-database-schema-editor
+            [visible]="true"
+            [value]="schemaState.value"
+            (cancel)="cancelDatabaseSchemaEditor()"
+            (apply)="submitDatabaseSchemaEditor($event)"
+          />
         }
       </section>
     </div>
@@ -1925,77 +2826,6 @@ function buildCodeDecorations(doc: ProseMirrorNode): DecorationSet {
         z-index: 20;
       }
 
-      .link-editor-popover {
-        position: fixed;
-        z-index: 19;
-        display: flex;
-        flex-direction: column;
-        gap: 0.55rem;
-        width: min(24rem, calc(100vw - 1.5rem));
-        padding: 0.75rem;
-        border-radius: 0.75rem;
-        border: 1px solid var(--border-color, #d8dde6);
-        background: var(--dropdown-bg, var(--bg-color, #fff));
-        box-shadow: 0 14px 28px rgba(2, 6, 23, 0.24);
-      }
-
-      .link-editor-popover__title {
-        font-size: 0.82rem;
-        font-weight: 700;
-        color: var(--text-color, #111);
-      }
-
-      .link-editor-popover__field {
-        display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-        color: var(--muted-text, #5f6b7f);
-      }
-
-      .link-editor-popover__input {
-        height: 2rem;
-        border: 1px solid var(--border-color, #d8dde6);
-        border-radius: 0.48rem;
-        padding: 0 0.56rem;
-        background: var(--bg-color, #fff);
-        color: var(--text-color, #111);
-        font: inherit;
-      }
-
-      .link-editor-popover__input:focus-visible {
-        outline: 2px solid var(--focus-ring-color, rgba(25, 118, 210, 0.35));
-        outline-offset: 1px;
-      }
-
-      .link-editor-popover__error {
-        font-size: 0.74rem;
-        color: var(--error-color, #c62828);
-      }
-
-      .link-editor-popover__actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: 0.42rem;
-      }
-
-      .link-editor-popover__btn {
-        border: 0;
-        border-radius: 0.45rem;
-        padding: 0.42rem 0.7rem;
-        background: var(--focus-color, #1976d2);
-        color: #fff;
-        font-size: 0.75rem;
-        font-weight: 600;
-        cursor: pointer;
-      }
-
-      .link-editor-popover__btn--ghost {
-        background: var(--hover-bg, #edf2f8);
-        color: var(--text-color, #111);
-      }
-
       @media (max-width: 640px) {
         .note-header-top {
           padding-inline: 0.75rem;
@@ -2062,6 +2892,7 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   readonly selectionVersion = signal(0);
   readonly presenceUsers = signal<NoteActiveUser[]>([]);
   readonly focusedLinkMenu = signal<FocusedLinkState | null>(null);
+  readonly databaseSchemaEditorState = signal<DatabaseSchemaEditorState | null>(null);
 
   readonly toolbarIcons = TOOLBAR_ICONS;
   readonly linkMenuIcons = LINK_MENU_ICONS;
@@ -2351,6 +3182,34 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     this.dismissTransientOverlays();
   }
 
+  @HostListener('window:notes-database-schema-open', ['$event'])
+  onDatabaseSchemaNodeOpen(event: Event): void {
+    if (!(event instanceof CustomEvent)) return;
+    const detail = event.detail as DatabaseSchemaNodeOpenDetail | null;
+    if (!detail) return;
+    this.openDatabaseSchemaEditorFromNode(detail.position, detail.mode);
+  }
+
+  private openDatabaseSchemaEditorFromNode(position: number | null, mode: 'view' | 'edit'): void {
+    if (mode !== 'edit') return;
+    if (!this.editorEnabled() || !this.canEdit()) return;
+    if (!this.editor) return;
+    if (typeof position === 'number') {
+      const selection = NodeSelection.create(this.editor.state.doc, position);
+      this.editor.view.dispatch(this.editor.state.tr.setSelection(selection));
+      this.queueSelectionVersionUpdate();
+    }
+    const selected = this.selectedDatabaseSchemaState(this.editor);
+    if (!selected) return;
+    this.databaseSchemaEditorState.set({
+      mode: 'edit',
+      position: selected.position,
+      value: selected.value,
+      error: null,
+    });
+    this.closeToolbarMenus();
+  }
+
   private activeEditor(): Editor | null {
     if (!this.editorEnabled() || !this.editor) return null;
     return this.editor;
@@ -2469,6 +3328,13 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     if (this.tryHandleBracketAutopair(event)) return true;
     if (this.tryHandleCodeSlashCommand(event)) return true;
     const key = event.key.toLowerCase();
+    if (!this.isModPressed(event) && !event.altKey && !event.shiftKey && key === 'escape') {
+      if (this.databaseSchemaEditorState()) {
+        event.preventDefault();
+        this.cancelDatabaseSchemaEditor();
+        return true;
+      }
+    }
     if (this.isModPressed(event) && key === 's') {
       event.preventDefault();
       void this.updateEditing();
@@ -2953,6 +3819,23 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       .run();
     this.tableMenuOpen.set(false);
     this.tablePreview.set(null);
+  }
+
+  databaseSchemaMenuLabel(): string {
+    return this.selectedDatabaseSchemaState() ? 'Редактировать схему' : 'Название схемы';
+  }
+
+  private selectedDatabaseSchemaState(editor: Editor | null = this.activeEditor()): SelectedDatabaseSchemaState | null {
+    this.selectionVersion();
+    if (!editor) return null;
+    const selection = editor.state.selection;
+    if (!(selection instanceof NodeSelection)) return null;
+    if (selection.node.type.name !== DATABASE_SCHEMA_NODE) return null;
+    const value = normalizeDatabaseSchemaAttrs(selection.node.attrs as DatabaseSchemaAttrs);
+    return {
+      position: selection.from,
+      value,
+    };
   }
 
   insertImageByUrl(): void {
@@ -3750,25 +4633,81 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
   insertDatabaseSchema(): void {
     const editor = this.activeEditor();
     if (!editor) return;
-    const title = window.prompt('Schema title', 'Database schema')?.trim();
-    if (!title) return;
-    const body =
-      window.prompt(
-        'Schema fields / SQL preview',
-        'users\\n- id uuid\\n- email text\\n- created_at timestamptz'
-      ) ?? '';
-    editor
-      .chain()
-      .focus()
-      .insertContent({
-        type: DATABASE_SCHEMA_NODE,
-        attrs: {
-          title,
-          body,
-        },
-      })
-      .run();
+    const selected = this.selectedDatabaseSchemaState(editor);
+    this.databaseSchemaEditorState.set({
+      mode: selected ? 'edit' : 'insert',
+      position: selected?.position ?? null,
+      value: selected?.value ?? createDefaultDatabaseSchemaValue(),
+      error: null,
+    });
     this.plusMenuOpen.set(false);
+    this.saveError.set(null);
+  }
+
+  cancelDatabaseSchemaEditor(): void {
+    this.databaseSchemaEditorState.set(null);
+  }
+
+  submitDatabaseSchemaEditor(value: DatabaseSchemaEditorValue): void {
+    const draft = this.databaseSchemaEditorState();
+    const editor = this.activeEditor();
+    if (!draft || !editor) {
+      this.cancelDatabaseSchemaEditor();
+      return;
+    }
+
+    const title = value.title.trim();
+    if (!title) {
+      this.databaseSchemaEditorState.update((state) =>
+        state ? { ...state, error: 'Please enter a schema title.' } : state
+      );
+      return;
+    }
+    const normalizedValue: DatabaseSchemaEditorValue = {
+      ...value,
+      title,
+      view: value.view as VisualSchemaViewState,
+      schema: value.schema as VisualSchemaModel,
+    };
+    const attrs = toDatabaseSchemaNodeAttrs(normalizedValue);
+
+    if (draft.mode === 'edit' && draft.position !== null) {
+      const changed = editor
+        .chain()
+        .focus()
+        .command(({ tr, dispatch }) => {
+          const node = tr.doc.nodeAt(draft.position ?? -1);
+          if (!node || node.type.name !== DATABASE_SCHEMA_NODE) return false;
+          if (dispatch) {
+            tr.setNodeMarkup(draft.position ?? -1, undefined, attrs);
+          }
+          return true;
+        })
+        .run();
+      if (!changed) {
+        this.databaseSchemaEditorState.update((state) =>
+          state
+            ? {
+                ...state,
+                error: 'Select a database schema block and retry.',
+              }
+            : state
+        );
+        return;
+      }
+    } else {
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: DATABASE_SCHEMA_NODE,
+          attrs,
+        })
+        .run();
+    }
+
+    this.cancelDatabaseSchemaEditor();
+    this.queueSelectionVersionUpdate();
   }
 
   insertCodeBlock(language: string): void {
@@ -4124,6 +5063,9 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
     if (this.linkEditorState()) {
       this.cancelLinkEditor();
     }
+    if (this.databaseSchemaEditorState()) {
+      this.cancelDatabaseSchemaEditor();
+    }
   }
 
   private shouldKeepOverlayOpenForTarget(target: Node): boolean {
@@ -4132,6 +5074,9 @@ export class UnifiedNoteEditorComponent implements OnDestroy {
       target.closest('.toolbar-popover') !== null ||
       target.closest('.link-focus-menu') !== null ||
       target.closest('.link-editor-popover') !== null ||
+      target.closest('app-database-schema-editor') !== null ||
+      target.closest('.schema-visual-shell') !== null ||
+      target.closest('.schema-editor-popover') !== null ||
       target.closest('.note-active-users') !== null ||
       target.closest('.note-active-users-popover') !== null
     );
